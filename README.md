@@ -42,7 +42,8 @@ An example:
 
 ## Questions
 
-* Require sorted input/output?
+* Require sorted input/output? QNAME sort will be far easier as you don't have
+  to wait until the next read in a pair arrives (might be on another chrom!)
 
 * Do we need to distinguish optical dupes (DT:SQ) from PCR (DT:LB) ?
   i.e. do we use library complexity? Also, how many optical dupes do we get on
@@ -66,4 +67,13 @@ An example:
   doesn't store any sequence info.
   read1Coordinate = POS
   read1ReferenceIndex = RNAME
+  clarification from http://broadinstitute.github.io/picard/faq.html:
+  > Q: How does MarkDuplicates work?
+  > A: The MarkDuplicates tool finds the 5' coordinates and mapping
+  > orientations of each read pair (single-end data is also handled). It takes
+  > all clipping into account as well as any gaps or jumps in the alignment.
+  > Matches all read pairs using the 5' coordinates and their orientations.
+  > It marks all but the "best" pair as duplicates, where "best" is defined as
+  > the read pair having the highest sum of base qualities of bases with Q ≥ 15.
+  so it just goes off end coords and orientations
 
