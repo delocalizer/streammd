@@ -9,6 +9,20 @@ something "good enough".
 
 60x human WGS 2x150bp reads ~ 6e8 fragments, 1.2e9 se reads
 
+Probability of false positive for Bloom filter with n elems already inserted:
+
+    n: # elements inserted
+    m: # bits in the array
+    k: # hash functions: optimal k = (m/n)ln(2)
+    pr(FP) ~ (1 - e**(-kn/m))**k
+
+If we take:
+
+    n = 1e9  (fragments)
+    m = 48e9 (6GB bit array)
+    k = 28   (optimal hash funcs)
+    pr(FP) ~ 1e-10
+
 ## Notes
 
 * 1024 is the SAM flag for 'duplicate'. Picard MarkDuplicates TAGGING_POLICY
@@ -24,6 +38,7 @@ An example:
 ## Implementation thoughts
 
 * multiple reader threads with the BF in shared mem
+* https://github.com/sangupta/bloomfilter
 
 ## Questions
 
