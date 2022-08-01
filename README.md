@@ -41,5 +41,12 @@ An example:
   be RANDOM. How much of a difference does it make, and given that, do we care?
 
 * More generally, what exactly is the Picard MD algorithm? How does it work for
-  pe reads?
+  pe reads? From MarkDuplicates.java src:
+  > The MarkDuplicates tool works by comparing sequences in the 5 prime
+  > positions of both reads and read-pairs in a SAM/BAM file. [...]
+  > Note that this is different from directly checking if the sequences match,
+  > which MarkDuplicates does not do.
+  That's a bit confusing. It mentions comparing sequence, then seems to say
+  it doesn't compare sequence. ReadEndsForMarkDuplicates structure certainly
+  doesn't store any sequence info.
 
