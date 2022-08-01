@@ -49,4 +49,6 @@ An example:
   That's a bit confusing. It mentions comparing sequence, then seems to say
   it doesn't compare sequence. ReadEndsForMarkDuplicates structure certainly
   doesn't store any sequence info.
+  read1Coordinate = POS
+  read1ReferenceIndex = RNAME
 
