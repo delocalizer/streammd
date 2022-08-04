@@ -42,9 +42,13 @@ If we take:
 
 ## Notes
 
-* 1024 is the SAM flag for 'duplicate'. Picard MarkDuplicates TAGGING_POLICY
+* 256 (0x100) means not primary alignment (secondary, multimapper). Empirically
+  we don't seem to output these from our mapping workflow.
+* 1024 (0x400) is the SAM flag for 'duplicate'. MarkDuplicates TAGGING_POLICY
   optionally sets the DT attribute to LB or SQ to record as PCR or optical dupe
   respectively.
+* 2048 (0x800) means supplementary (chimeric and not the representative). We do
+  get lots of these in our bams.
 * bam @HD VN: SO: is added by samtools sort
 * a05168de-0e6d-4867-82b1-22d330dac0f8.bam is from 2x100bp pe seq of Melanoma
   control cell line.
@@ -107,3 +111,69 @@ An example:
   > the read pair having the highest sum of base qualities of bases with Q ≥ 15.
   so it just goes off end coords and orientations
 
+## Data exploration
+
+I extracted the first 1M dupes from a05168de-0e6d-4867-82b1-22d330dac0f8:
+
+```
+samtools view -h -f 1024 \
+	/mnt/lustre/working/genomeinfo/sample/f/5/f5d4165d-0768-4e9c-8888-9810fce7210f/aligned_read_group_set/a05168de-0e6d-4867-82b1-22d330dac0f8.bam |\
+	head -1000000 \
+	> 1Mdups.sam
+```
+Now looking at the distribution of SAM flags:
+```
+samtools view 1Mdups.sam |cut -f2|sort|uniq -c|sort -n
+```
+we get:
+```
+      9 3137
+      9 3257
+     10 3201
+     12 3185
+     12 3209
+     13 3153
+     13 3169
+     16 3233
+     16 3249
+     22 3145
+     22 3155
+     22 3193
+     22 3219
+     25 3217
+     26 3171
+     30 3187
+     32 3251
+     38 3139
+     39 3235
+     58 3203
+    379 1201
+    422 1137
+    424 1089
+    428 1153
+    593 1209
+    632 1161
+   1645 1105
+   1696 1185
+   1750 1169
+   1818 1121
+   4867 1145
+   5182 1097
+ 244290 1107
+ 244293 1187
+ 245516 1171
+ 245517 1123
+```
+
+So the great majority are 1123, 1171, 1187, 1107:
+
+  * 1123 = read paired, read mapped in proper pair, mate reverse strand, first in pair, is dupe
+  * 1171 = read paired, read mapped in proper pair, read reverse strand, second in pair, is dupe
+  * 1187 = read paired, read mapped in proper pair, mate reverse strand, second in pair, is dupe
+  * 1107 = read paired, read mapped in proper pair, read reverse strand, first in pair, is dupe
+
+i.e. 'normal' pairs.
+Then there's 1097 and 1145, which are mate unmapped.
+Then there's 1121,1169,1105,1185 which are 'not proper pair' — i.e. mates mapped
+too far apart or too close (lots of both cases in our data).
+Then a big tail of other stuff.
