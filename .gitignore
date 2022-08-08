@@ -4,8 +4,5 @@ build/
 htmlcov/
 *.egg-info/
 __pycache__/
-scratch
-*.pbs
-*.log
-*.bam
-*.metrics
+scratch/*
+!scratch/*.pbs
