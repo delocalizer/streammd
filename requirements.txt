@@ -1,2 +1,2 @@
 bitarray ~= 2.6
-xxhash ~= 3.0
+pyfarmhash ~= 0.3.2 

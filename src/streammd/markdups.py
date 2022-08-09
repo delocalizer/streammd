@@ -13,18 +13,19 @@ def main():
     """
     Test it
     """
-    workers = 6 
+    workers = 10 
     with SharedMemoryManager() as smm,\
             ProcessPoolExecutor(max_workers=workers) as ppe:
 
-        bf = BloomFilter(smm, int(1e6), 1e-1, hard_limit=False)
+        target_size = 5 * int(1e6)
+        bf = BloomFilter(smm, target_size, 1e-7)
 
         # Here we assume we know the list of items in advance, so we can
         # construct N chunks of items in advance. When we're reading through a
         # bam in real time that won't be the case but we can do something like
         # create 1 reader per contig, so 'items' is the list of contigs and
         # the mapped func takes a contig name as an argument.
-        items = list(str(i) for i in range(1000001))
+        items = list(str(i) for i in range(target_size))
 
         def chunker(l, n):
             """
@@ -38,11 +39,18 @@ def main():
         batch_args = ((bf.shl_vars.shm.name, bf.shm_bits.name, chunk)
                       for chunk in chunks)
         ppe.map(add_batch, *zip(*batch_args)) 
+        ppe.shutdown()
 
-    check = [0, 1, 10, 100, 1000, 10000, 100000, 1000000, 2000000, 10000000]
-    for j in check:
-        in_filt = str(j) in bf
-        print(f'{j} {"is" if in_filt else "is NOT"} present')
+        print(f'{len(items)} items added (true)')
+        print(f'{bf.count()} items added (approx)')
+        check = [0, 1, 10, 100, 1000, 10000, 100000, 1000000, 2000000, 10000000]
+        for j in check:
+            in_filt = str(j) in bf
+            print(f'{j} {"is" if in_filt else "is NOT"} present')
+    #for k in range(target_size, 2*target_size):
+    #    in_filt = str(k) in bf
+    #    if in_filt:
+    #        print(f'FP {k}')
 
 
 if __name__ == '__main__':
