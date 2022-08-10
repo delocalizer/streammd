@@ -106,15 +106,19 @@ relative to the + (sense) reference:
 
 ```
 5' --CTTTCAGTTTAGTTTTCACTAGAAC-- 3'
+     |||||||||||||||||||||||||
 3' --GAAAGTCAAATCAAAAGTGATCTTG-- 5' 
 ```
 
 When sequenced, R1 is from the fwd strand, R2 from the reverse. In this
-example R1, R2 are 16bp reads and overlap by 7 bases `(TLEN=2*16-7=25)`:
+example R1, R2 are 16bp reads and overlap by 7 bases.
 
 ```
+           overlap
+           vvvvvvv
 R1--------------->
   CTTTCAGTTTAGTTTTCACTAGAAC
+  |||||||||||||||||||||||||
   GAAAGTCAAATCAAAAGTGATCTTG
            <---------------R2
 ```
@@ -143,20 +147,26 @@ Note the SAM flags:
 99  = read paired, read mapped in proper pair, mate reverse strand, first in pair
 147 = read paired, read mapped in proper pair, read reverse strand, second in pair
 ```
+Note also the TLEN is -ve for the second in pair (rightmost segment).
 
-Alternatively, we may have started with a fragment oriented in the reverse
+
+Alternatively, we may have started with the fragment oriented in the reverse
 direction relative to the reference:
 
 ```
 5' --GTTCTAGTGAAAACTAAACTGAAAG-- 3'
+     |||||||||||||||||||||||||
 3' --CAAGATCACTTTTGATTTGACTTTC-- 5' 
 ```
 
 When sequenced, R1 is from the rev strand, R2 is from the forward:
 
 ```
+           overlap
+           vvvvvvv
 R1--------------->
   GTTCTAGTGAAAACTAAACTGAAAG
+  |||||||||||||||||||||||||
   CAAGATCACTTTTGATTTGACTTTC
            <---------------R2
 ```
@@ -184,5 +194,4 @@ Note the SAM flags:
 83  = read paired, read mapped in proper pair, read reverse strand, first in pair
 163 = read paired, read mapped in proper pair, mate reverse strand, second in pair
 ```
-
-Note also in this case the TLEN is negative for first in pair.
+Note in this case the TLEN is -ve for the first in pair (rightmost segment).
