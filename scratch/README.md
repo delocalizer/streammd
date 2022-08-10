@@ -93,3 +93,94 @@ At the end of this we have:
 1000.DI.n_gt_1.coord.MD.bam
 1000.DI.n_gt_1.coord.MD.bam.metrics
 ```
+
+## Notes about paired-end sequencing
+
+Paired-end Illumina sequencing: See https://www.youtube.com/watch?v=womKfikWlxM
+The following is NOT a correct description of the actual steps in the process,
+but a useful way to visualize the end result of the process.
+
+Start with ds DNA. From BLAST we happen to know this is a 25bp sequence at
+chr1:71937741 in GRCh37.p13, and the fragment is oriented in fwd direction:
+
+```
+5' --CTTTCAGTTTAGTTTTCACTAGAAC-- 3'
+3' --GAAAGTCAAATCAAAAGTGATCTTG-- 5' 
+```
+
+When sequenced, R1 is from the fwd strand, R2 from the reverse. In this
+example R1, R2 are 16bp reads and overlap by 7 bases `(TLEN=2*16-7=25)`:
+
+```
+R1--------------->
+  CTTTCAGTTTAGTTTTCACTAGAAC
+  GAAAGTCAAATCAAAAGTGATCTTG
+           <---------------R2
+```
+
+And that's how the reads appear in paired fastqs:
+
+```
+r1.fastq:
+@UNIQUE_QNAME
+CTTTCAGTTTAGTTTT
+r2.fastq:
+@UNIQUE_QNAME
+GTTCTAGTGAAAACTA
+```
+
+When they're aligned, the aligner finds alignment of the R2 rev-comp and all
+reads are reported in SAM format as forward-aligned:
+
+```
+UNIQUE_QNAME	99	chr1	71937741	60	16M	=	71937759	25	CTTTCAGTTTAGTTTT
+UNIQUE_QNAME	147	chr1	71937759	60	16M	=	71937741	-25	TAGTTTTCACTAGAAC
+```
+
+Note the SAM flags:
+```
+99  = read paired, read mapped in proper pair, mate reverse strand, first in pair
+147 = read paired, read mapped in proper pair, read reverse strand, second in pair
+```
+
+Alternatively, we may have stared with the fragment oriented in the reverse:
+
+```
+5' --GTTCTAGTGAAAACTAAACTGAAAG-- 3'
+3' --CAAGATCACTTTTGATTTGACTTTC-- 5' 
+```
+
+When sequenced, R1 is from the rev strand, R2 is from the forward:
+
+```
+R1--------------->
+  GTTCTAGTGAAAACTAAACTGAAAG
+  CAAGATCACTTTTGATTTGACTTTC
+           <---------------R2
+```
+
+```
+And that's how the reads appear in paired fastqs:
+r1.fastq:
+@UNIQUE_QNAME_2
+GTTCTAGTGAAAACTA
+r2.fastq:
+@UNIQUE_QNAME_2
+CTTTCAGTTTAGTTTT
+```
+
+When they're aligned, the aligner finds alignment of the R1 rev-comp and all
+reads are reported in SAM format as forward-aligned:
+
+```
+UNIQUE_QNAME_2	83	chr1	71937759	60	16M	=	71937741	-25	TAGTTTTCACTAGAAC
+UNIQUE_QNAME_2	163	chr1	71937741	60	16M	=	71937759	25	CTTTCAGTTTAGTTTT
+```
+
+Note the SAM flags:
+```
+83  = read paired, read mapped in proper pair, read reverse strand, first in pair
+163 = read paired, read mapped in proper pair, mate reverse strand, second in pair
+```
+
+Note also in this case the TLEN is negative for first in pair.
