@@ -101,7 +101,8 @@ The following is NOT a correct description of the actual steps in the process,
 but a useful way to visualize the end result of the process.
 
 Start with ds DNA. From BLAST we happen to know this is a 25bp sequence at
-chr1:71937741 in GRCh37.p13, and the fragment is oriented in fwd direction:
+chr1:71937741 in GRCh37.p13, and the fragment is oriented in fwd direction
+relative to the + (sense) reference:
 
 ```
 5' --CTTTCAGTTTAGTTTTCACTAGAAC-- 3'
@@ -143,7 +144,8 @@ Note the SAM flags:
 147 = read paired, read mapped in proper pair, read reverse strand, second in pair
 ```
 
-Alternatively, we may have stared with the fragment oriented in the reverse:
+Alternatively, we may have started with a fragment oriented in the reverse
+direction relative to the reference:
 
 ```
 5' --GTTCTAGTGAAAACTAAACTGAAAG-- 3'
