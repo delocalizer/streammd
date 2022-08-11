@@ -7,9 +7,9 @@ import os
 from bloomfilter import BloomFilter
 from pysam import AlignmentHeader, AlignedSegment
 
-
 MAX_HEADER_SIZE = 1024 ** 2  # 1M
 DEFAULT_WORKERS = 8
+
 
 def samrecords(queue, sharedv, hlock, infd=0, outfd=1):
     """
@@ -18,7 +18,7 @@ def samrecords(queue, sharedv, hlock, infd=0, outfd=1):
     Header lines are written directly to the output stream and also to the
     dict key sharedv['header']. When all header lines are written, hlock is
     released.
-    
+
     Args:
         queue: multiprocessing.Queue to put SAM records
         sharedv: multiprocessing.Manager.dict; header text is written to the
@@ -51,10 +51,10 @@ def markdups(queue, sharedv, hlock, outfd=1):
 
     Args:
         queue: multiprocessing.Queue to put SAM records
-        sharedv: multiprocessing.Manager.dict; 'header' key is header text. 
+        sharedv: multiprocessing.Manager.dict; 'header' key is header text.
         hlist: ShareableList; the 0th element stores the header text.
         outfd: output stream file descriptor (default=1)
-    
+
     Returns:
         None
     """
@@ -66,7 +66,7 @@ def markdups(queue, sharedv, hlock, outfd=1):
         alignment = AlignedSegment.fromstring(raw, header)
         # os.write is atomic (unlike sys.stdout.write)
         os.write(outfd, (alignment.to_string() + '\n').encode('ascii'))
-    
+
 
 def main():
     manager = Manager()
@@ -103,7 +103,7 @@ if __name__ == '__main__':
 #    """
 #    Test it
 #    """
-#    workers = 10 
+#    workers = 10
 #    with SharedMemoryManager() as smm,\
 #            ProcessPoolExecutor(max_workers=workers) as ppe:
 #
@@ -120,7 +120,7 @@ if __name__ == '__main__':
 #        # this creates 4 duplicates of every unique value
 #        items = list(str(i) for i in range(int(target_size/5))) * 5
 #        shuffle(items)
-#        
+#
 #
 #        def chunker(l, n):
 #            """
@@ -133,7 +133,7 @@ if __name__ == '__main__':
 #
 #        batch_args = ((bf.shl_vars.shm.name, bf.shm_bits.name, chunk)
 #                      for chunk in chunks)
-#        dupes = ppe.map(add_batch, *zip(*batch_args)) 
+#        dupes = ppe.map(add_batch, *zip(*batch_args))
 #        ppe.shutdown()
 #
 #        print(f'{len(items)} total items added (true)')
