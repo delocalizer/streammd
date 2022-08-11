@@ -1,17 +1,17 @@
 """
 Mark duplicates on SAM file input stream.
 """
-from multiprocessing import Manager, Pool, Process
+from multiprocessing import JoinableQueue, Process
 from multiprocessing.managers import SharedMemoryManager
 import os
 from bloomfilter import BloomFilter
 from pysam import AlignmentHeader, AlignedSegment
 
-MAX_HEADER_SIZE = 1024 ** 2  # 1M
 DEFAULT_WORKERS = 8
+SENTINEL = 'STOP'
 
 
-def samrecords(queue, sharedv, hlock, infd=0, outfd=1):
+def samrecords(samq, headerq, workers, batchsize=50, infd=0, outfd=1):
     """
     Read records from a SAM file input stream and add them to queue.
 
@@ -30,22 +30,30 @@ def samrecords(queue, sharedv, hlock, infd=0, outfd=1):
     Returns:
         None
     """
+    batch = []
     headlines = []
-    header_complete = False
+    header_done = False
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
             # os.write is atomic (unlike sys.stdout.write)
             os.write(outfd, line.encode('ascii'))
         else:
-            if not header_complete:
-                sharedv['header'] = ''.join(headlines)
-                header_complete = True
-                hlock.release()
-            queue.put(line)
+            if not header_done:
+                header_done = True
+                header = ''.join(headlines)
+                for _ in range(workers):
+                    headerq.put(header)
+            batch.append(line)
+            if len(batch) == batchsize:
+                samq.put(batch)
+                batch = []
+    samq.put(batch)
+    for _ in range(workers):
+        samq.put(SENTINEL)
 
 
-def markdups(queue, sharedv, hlock, outfd=1):
+def markdups(samq, headerq, outfd=1):
     """
     Process SAM record.
 
@@ -58,31 +66,41 @@ def markdups(queue, sharedv, hlock, outfd=1):
     Returns:
         None
     """
-    hlock.acquire()
-    header = AlignmentHeader.from_text(sharedv['header'])
-    hlock.release()
+    header = AlignmentHeader.from_text(headerq.get(timeout=1))
+    headerq.task_done()
     while True:
-        raw = queue.get()
-        alignment = AlignedSegment.fromstring(raw, header)
-        # os.write is atomic (unlike sys.stdout.write)
-        os.write(outfd, (alignment.to_string() + '\n').encode('ascii'))
+        lines = samq.get()
+        if lines == SENTINEL:
+            samq.task_done()
+            break
+        for line in lines:
+            alignment = AlignedSegment.fromstring(line, header)
+            # os.write is atomic (unlike sys.stdout.write)
+            os.write(outfd, (alignment.to_string() + '\tdone\n').encode('ascii'))
+        samq.task_done()
 
 
 def main():
-    manager = Manager()
-    samq = manager.Queue(10000)
-    sharedv = manager.dict()
-    hlock = manager.Lock()
-    hlock.acquire()
-    producer = Process(target=samrecords, args=(samq, sharedv, hlock))
+    workers = DEFAULT_WORKERS
+    samq = JoinableQueue(10000)
+    headerq = JoinableQueue(10)
+    producer = Process(target=samrecords, args=(samq, headerq, workers))
     producer.start()
-    nworkers = DEFAULT_WORKERS
-    pool = Pool(nworkers)
-    for _ in range(nworkers):
-        pool.apply_async(markdups, args=(samq, sharedv, hlock))
-    # producer is done once stdin is exhausted
+    consumers = [
+        Process(target=markdups, args=(samq, headerq))
+        for _ in range(workers)
+    ]
+    for c in consumers:
+        c.start()
+    for c in consumers:
+        c.join()
+        c.close()
     producer.join()
     producer.close()
+    headerq.join()
+    headerq.close()
+    samq.join()
+    samq.close()
 
 
 if __name__ == '__main__':
@@ -148,6 +166,3 @@ if __name__ == '__main__':
 #    #    if in_filt:
 #    #        print(f'FP {k}')
 
-
-if __name__ == '__main__':
-    main()
