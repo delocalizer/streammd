@@ -13,7 +13,7 @@ SENTINEL = 'STOP'
 
 def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
     """
-    Read records from a SAM file input stream and add them to queue.
+    Read records from a SAM file input stream and enqueue them in batches.
 
     Header lines are written directly to the output stream and also to the
     header queue.
@@ -22,32 +22,31 @@ def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
         samq: multiprocessing.Queue to put SAM records.
         headerq: multiprocessing.Queue to put header.
         nconsumers: number of consumer processes.
-        batchsize: number of lines in queue batch.
+        batchsize: number of lines per batch in samq (default=50).
         infd: input stream file descriptor (default=0).
         outfd: output stream file descriptor (default=1).
 
     Returns:
         None
     """
-    batch = []
+    samlines = []
     headlines = []
-    header_done = False
+    header = None
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
             # os.write is atomic (unlike sys.stdout.write)
             os.write(outfd, line.encode('ascii'))
         else:
-            if not header_done:
-                header_done = True
+            if not header:
                 header = ''.join(headlines)
                 for _ in range(nconsumers):
                     headerq.put(header)
-            batch.append(line)
-            if len(batch) == batchsize:
-                samq.put(batch)
-                batch = []
-    samq.put(batch)
+            samlines.append(line)
+            if len(samlines) == batchsize:
+                samq.put(samlines)
+                samlines = []
+    samq.put(samlines)
     for _ in range(nconsumers):
         samq.put(SENTINEL)
 
@@ -57,22 +56,21 @@ def markdups(samq, headerq, outfd=1):
     Process SAM file records.
 
     Args:
-        samq: multiprocessing.Queue to get SAM records.
+        samq: multiprocessing.Queue to get batches of SAM records.
         headerq: multiprocessing.Queue to get header.
         outfd: output stream file descriptor (default=1).
 
     Returns:
         None
     """
-    header = AlignmentHeader.from_text(headerq.get(timeout=1))
+    header = AlignmentHeader.from_text(headerq.get())
     while True:
-        lines = samq.get()
-        if lines == SENTINEL:
+        batch = samq.get()
+        if batch == SENTINEL:
             break
-        for line in lines:
+        for line in batch:
             alignment = AlignedSegment.fromstring(line, header)
-            # os.write is atomic (unlike sys.stdout.write)
-            os.write(outfd, (alignment.to_string() + '\tdone\n').encode('ascii'))
+            os.write(outfd, (alignment.to_string()+'\n').encode('ascii'))
 
 
 def main():
