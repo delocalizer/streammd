@@ -11,18 +11,19 @@ from pysam import AlignmentHeader, AlignedSegment
 MAX_HEADER_SIZE = 1024 ** 2  # 1M
 DEFAULT_WORKERS = 8
 
-def samrecords(queue, hlist, hlock, infd=0, outfd=1):
+def samrecords(queue, sharedv, hlock, infd=0, outfd=1):
     """
     Read records from a SAM file input stream and add them to queue.
 
     Header lines are written directly to the output stream and also to the
-    shared memory object hlist[0]. When all header lines are written, hlock
-    is released.
+    dict key sharedv['header']. When all header lines are written, hlock is
+    released.
     
     Args:
         queue: multiprocessing.Queue to put SAM records
-        hlist: ShareableList; the 0th element stores the header text.
-        hlock: released once hlist[0] contains the header text.
+        sharedv: multiprocessing.Manager.dict; header text is written to the
+            value of the 'header' key.
+        hlock: released once sharedv['header'] contains the header text.
         infd: input stream file descriptor (default=0)
         outfd: output stream file descriptor (default=1)
 
@@ -34,21 +35,23 @@ def samrecords(queue, hlist, hlock, infd=0, outfd=1):
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
+            # os.write is atomic (unlike sys.stdout.write)
             os.write(outfd, line.encode('ascii'))
         else:
             if not header_complete:
-                hlist[0] = ''.join(headlines)
+                sharedv['header'] = ''.join(headlines)
                 header_complete = True
                 hlock.release()
             queue.put(line)
 
 
-def markdups(queue, hlist, hlock, outfd=1):
+def markdups(queue, sharedv, hlock, outfd=1):
     """
     Process SAM record.
 
     Args:
         queue: multiprocessing.Queue to put SAM records
+        sharedv: multiprocessing.Manager.dict; 'header' key is header text. 
         hlist: ShareableList; the 0th element stores the header text.
         outfd: output stream file descriptor (default=1)
     
@@ -56,30 +59,27 @@ def markdups(queue, hlist, hlock, outfd=1):
         None
     """
     hlock.acquire()
-    header = AlignmentHeader.from_text(hlist[0])
+    header = AlignmentHeader.from_text(sharedv['header'])
     hlock.release()
     while True:
         raw = queue.get()
         alignment = AlignedSegment.fromstring(raw, header)
-        os.write(outfd, alignment.to_string().encode('ascii'))
+        # os.write is atomic (unlike sys.stdout.write)
+        os.write(outfd, (alignment.to_string() + '\n').encode('ascii'))
     
 
 def main():
     manager = Manager()
     samq = manager.Queue(10000)
+    sharedv = manager.dict()
     hlock = manager.Lock()
-    memmanager = SharedMemoryManager()
-    memmanager.start()
-    # Allow 1M header
-    header_shl = memmanager.ShareableList([' ' * MAX_HEADER_SIZE])
     hlock.acquire()
-    producer = Process(target=samrecords,
-                       args=(samq, header_shl, hlock))
+    producer = Process(target=samrecords, args=(samq, sharedv, hlock))
     producer.start()
     nworkers = DEFAULT_WORKERS
     pool = Pool(nworkers)
     for _ in range(nworkers):
-        pool.apply_async(markdups, args=(samq, header_shl, hlock))
+        pool.apply_async(markdups, args=(samq, sharedv, hlock))
     # producer is done once stdin is exhausted
     producer.join()
     producer.close()
