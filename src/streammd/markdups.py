@@ -1,7 +1,7 @@
 """
 Mark duplicates on SAM file input stream.
 """
-from multiprocessing import JoinableQueue, Process
+from multiprocessing import Queue, Process
 from multiprocessing.managers import SharedMemoryManager
 import os
 from bloomfilter import BloomFilter
@@ -11,21 +11,20 @@ DEFAULT_WORKERS = 8
 SENTINEL = 'STOP'
 
 
-def samrecords(samq, headerq, workers, batchsize=50, infd=0, outfd=1):
+def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
     """
     Read records from a SAM file input stream and add them to queue.
 
     Header lines are written directly to the output stream and also to the
-    dict key sharedv['header']. When all header lines are written, hlock is
-    released.
+    header queue.
 
     Args:
-        queue: multiprocessing.Queue to put SAM records
-        sharedv: multiprocessing.Manager.dict; header text is written to the
-            value of the 'header' key.
-        hlock: released once sharedv['header'] contains the header text.
-        infd: input stream file descriptor (default=0)
-        outfd: output stream file descriptor (default=1)
+        samq: multiprocessing.Queue to put SAM records.
+        headerq: multiprocessing.Queue to put header.
+        nconsumers: number of consumer processes.
+        batchsize: number of lines in queue batch.
+        infd: input stream file descriptor (default=0).
+        outfd: output stream file descriptor (default=1).
 
     Returns:
         None
@@ -42,65 +41,53 @@ def samrecords(samq, headerq, workers, batchsize=50, infd=0, outfd=1):
             if not header_done:
                 header_done = True
                 header = ''.join(headlines)
-                for _ in range(workers):
+                for _ in range(nconsumers):
                     headerq.put(header)
             batch.append(line)
             if len(batch) == batchsize:
                 samq.put(batch)
                 batch = []
     samq.put(batch)
-    for _ in range(workers):
+    for _ in range(nconsumers):
         samq.put(SENTINEL)
 
 
 def markdups(samq, headerq, outfd=1):
     """
-    Process SAM record.
+    Process SAM file records.
 
     Args:
-        queue: multiprocessing.Queue to put SAM records
-        sharedv: multiprocessing.Manager.dict; 'header' key is header text.
-        hlist: ShareableList; the 0th element stores the header text.
-        outfd: output stream file descriptor (default=1)
+        samq: multiprocessing.Queue to get SAM records.
+        headerq: multiprocessing.Queue to get header.
+        outfd: output stream file descriptor (default=1).
 
     Returns:
         None
     """
     header = AlignmentHeader.from_text(headerq.get(timeout=1))
-    headerq.task_done()
     while True:
         lines = samq.get()
         if lines == SENTINEL:
-            samq.task_done()
             break
         for line in lines:
             alignment = AlignedSegment.fromstring(line, header)
             # os.write is atomic (unlike sys.stdout.write)
             os.write(outfd, (alignment.to_string() + '\tdone\n').encode('ascii'))
-        samq.task_done()
 
 
 def main():
-    workers = DEFAULT_WORKERS
-    samq = JoinableQueue(10000)
-    headerq = JoinableQueue(10)
-    producer = Process(target=samrecords, args=(samq, headerq, workers))
+    nconsumers = DEFAULT_WORKERS
+    samq = Queue(1000)
+    headerq = Queue(10)
+    producer = Process(target=samrecords, args=(samq, headerq, nconsumers))
     producer.start()
     consumers = [
         Process(target=markdups, args=(samq, headerq))
-        for _ in range(workers)
+        for _ in range(nconsumers)
     ]
-    for c in consumers:
-        c.start()
-    for c in consumers:
-        c.join()
-        c.close()
+    list(map(lambda x: x.start(), consumers))
+    list(map(lambda x: x.join(), consumers))
     producer.join()
-    producer.close()
-    headerq.join()
-    headerq.close()
-    samq.join()
-    samq.close()
 
 
 if __name__ == '__main__':
@@ -121,9 +108,9 @@ if __name__ == '__main__':
 #    """
 #    Test it
 #    """
-#    workers = 10
+#    nconsumers = 10
 #    with SharedMemoryManager() as smm,\
-#            ProcessPoolExecutor(max_workers=workers) as ppe:
+#            ProcessPoolExecutor(max_nconsumers=nconsumers) as ppe:
 #
 #        target_size = int(1e7)
 #        bf = BloomFilter(smm, target_size, 1e-7)
@@ -147,7 +134,7 @@ if __name__ == '__main__':
 #            for i in range(0, n):
 #                yield l[i::n]
 #
-#        chunks = chunker(items, workers)
+#        chunks = chunker(items, nconsumers)
 #
 #        batch_args = ((bf.shl_vars.shm.name, bf.shm_bits.name, chunk)
 #                      for chunk in chunks)
