@@ -1,13 +1,16 @@
 """
 Mark duplicates on SAM file input stream.
 """
+from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Queue, Process
 from multiprocessing.managers import SharedMemoryManager
 import os
 from bloomfilter import BloomFilter
 from pysam import AlignmentHeader, AlignedSegment
 
-DEFAULT_WORKERS = 8
+DEFAULT_FPRATE = 1e-6
+DEFAULT_NITEMS = 1e6
+DEFAULT_NWORKERS = 8
 SENTINEL = 'STOP'
 
 
@@ -35,7 +38,6 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
-            # os.write is atomic (unlike sys.stdout.write)
             os.write(outfd, line.encode('ascii'))
         else:
             if not header:
@@ -51,11 +53,12 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
         samq.put(SENTINEL)
 
 
-def markdups(headerq, samq, outfd=1):
+def markdups(bfconfig, headerq, samq, outfd=1):
     """
     Process SAM file records.
 
     Args:
+        bfconfig: Bloom filter configuration dict.
         headerq: multiprocessing.Queue to get header.
         samq: multiprocessing.Queue to get batches of SAM records.
         outfd: output stream file descriptor (default=1).
@@ -63,6 +66,7 @@ def markdups(headerq, samq, outfd=1):
     Returns:
         None
     """
+    bf = BloomFilter.copy(bfconfig)
     header = AlignmentHeader.from_text(headerq.get())
     while True:
         batch = samq.get()
@@ -70,30 +74,45 @@ def markdups(headerq, samq, outfd=1):
             break
         for line in batch:
             alignment = AlignedSegment.fromstring(line, header)
+            # TODO
+            # 1. create the hashable readends thing.
+            # 2. add it to bf and if already present, mark this as a dupe:
+            #    if bf.add(readends):
+            #        alignment.flag += 1024
+            
+            # in contrast to sys.stdout.write, os.write is atomic so we get
+            # whole lines in the output and we don't have to care about
+            # locking or using an output queue
             os.write(outfd, (alignment.to_string()+'\n').encode('utf-8'))
 
 
 def main():
-    nconsumers = DEFAULT_WORKERS
+
+    nconsumers = DEFAULT_NWORKERS
     headerq = Queue(nconsumers)
     samq = Queue(1000)
     producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
     producer.start()
-    consumers = [
-        Process(target=markdups, args=(headerq, samq))
-        for _ in range(nconsumers)
-    ]
-    list(map(lambda x: x.start(), consumers))
-    list(map(lambda x: x.join(), consumers))
-    producer.join()
+    with SharedMemoryManager() as smm:
+        nitems = DEFAULT_NITEMS
+        fprate = DEFAULT_FPRATE
+        bf = BloomFilter(smm, nitems, fprate)
+        consumers = [
+            Process(target=markdups, args=(bf.config, headerq, samq))
+            for _ in range(nconsumers)
+        ]
+        list(map(lambda x: x.start(), consumers))
+        list(map(lambda x: x.join(), consumers))
+        producer.join()
 
 
 if __name__ == '__main__':
     main()
 
-# def read_bam(
-#def add_batch(bf_vars, bf_bits, items):
-#    bf = BloomFilter.copy(bf_vars, bf_bits)
+#from random import shuffle
+#
+#def add_batch(bf_config, items):
+#    bf = BloomFilter.copy(bf_config)
 #    dupes = 0
 #    for item in items:
 #        present = bf.add(item)
@@ -106,9 +125,9 @@ if __name__ == '__main__':
 #    """
 #    Test it
 #    """
-#    nconsumers = 10
+#    nconsumers = 1 
 #    with SharedMemoryManager() as smm,\
-#            ProcessPoolExecutor(max_nconsumers=nconsumers) as ppe:
+#            ProcessPoolExecutor(max_workers=nconsumers) as ppe:
 #
 #        target_size = int(1e7)
 #        bf = BloomFilter(smm, target_size, 1e-7)
@@ -134,8 +153,7 @@ if __name__ == '__main__':
 #
 #        chunks = chunker(items, nconsumers)
 #
-#        batch_args = ((bf.shl_vars.shm.name, bf.shm_bits.name, chunk)
-#                      for chunk in chunks)
+#        batch_args = ((bf.config, chunk) for chunk in chunks)
 #        dupes = ppe.map(add_batch, *zip(*batch_args))
 #        ppe.shutdown()
 #
@@ -150,4 +168,6 @@ if __name__ == '__main__':
 #    #    in_filt = str(k) in bf
 #    #    if in_filt:
 #    #        print(f'FP {k}')
-
+#
+#if __name__ == '__main__':
+#    main()
