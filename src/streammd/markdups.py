@@ -65,8 +65,10 @@ def readends(alignment):
     if not (read_reverse ^ mate_reverse):
         return None
     ends = (
-        (alignment.reference_name, alignment.reference_start),
-        (alignment.next_reference_name, alignment.next_reference_start))
+        (alignment.reference_name,
+            alignment.reference_start - alignment.query_alignment_start + 1),
+        (alignment.next_reference_name,
+            alignment.next_reference_start))
     return f'{ends[0][0]}{ends[0][1]}{ends[1][0]}{ends[1][1]}'
 
 

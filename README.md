@@ -177,3 +177,77 @@ Then there's 1097 and 1145, which are mate unmapped.
 Then there's 1121,1169,1105,1185 which are 'not proper pair' — i.e. mates mapped
 too far apart or too close (lots of both cases in our data).
 Then a big tail of other stuff.
+
+# Testing our impl
+
+20220812
+```
+[conradL@outgrabe streammd]$ samtools view -f 1024 scratch/1000.DI.n_gt_1.coord.MD.sam |wc -l
+2034
+[conradL@outgrabe streammd]$ python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.coord.sam|samtools view -f 1024 -|wc -l
+1931
+```
+
+So we're currently at ~ 95% of what Picard MarkDups does; 103 records short.
+Let's try to find them.
+
+Here are 4: DI:i:1327
+```
+samtools view -h -f16 scratch/1000.DI.n_gt_1.coord.MD.sam |samtools view -f 32|wc -l
+4
+```
+These are 2 sets of pairs, where they're marked 0x10 (16) and 0x20 (32) — i.e.
+read and its mate are both reverse. We explicitly don't count them at the
+moment.
+
+There are 0 that are both forward:
+```
+samtools view -h -F16 scratch/1000.DI.n_gt_1.coord.MD.sam |samtools view -F 32 -|wc -l
+0
+```
+
+There are 0 that are unmapped (either end):
+```
+[conradL@outgrabe streammd]$ samtools view -f4 scratch/1000.DI.n_gt_1.coord.MD.sam |wc -l
+0
+[conradL@outgrabe streammd]$ samtools view -f8 scratch/1000.DI.n_gt_1.coord.MD.sam |wc -l
+0
+```
+
+What about clipping? Are we handling that properly?
+```
+[conradL@outgrabe streammd]$ samtools view -f1024 scratch/1000.DI.n_gt_1.coord.MD.sam |cut -f6|grep -P '\d+[SH]'|wc -l
+59
+[conradL@outgrabe streammd]$ python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.coord.sam |samtools view -f 1024|cut -f6|grep -P '\d+[SH]'|wc -l
+21
+```
+So we seem a bit short there... interestingly there is also one hard clip and
+two soft clips in our impl that aren't in Picard MD so that's worth looing at:
+```
+diff <(samtools view -f1024 scratch/1000.DI.n_gt_1.coord.MD.sam |cut -f6|grep -P '\d+[SH]'|sort|uniq) <(python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.coord.sam |samtools view -f 1024|cut -f6|grep -P '\d+[SH]'|sort|uniq)|grep '^>'
+> 56H45M
+> 61M40S
+> 98M3S
+```
+
+Look at these two pairs that are MD in Picard:
+```
+HWI-ST1213:151:C1DTBACXX:2:2109:18011:23563	99	chr1	59256660	60	101M	=59256870	311	ATTTATAAAGAAAAAAAAAGGTGTATTTGGCTCATAATTCTGCTGCTTGGAAAGTTCATGATTGGGCATCTGCATCTGGTAAGGGCCTCAGGCTGTTTCTA	CCCFFFFFHHHHGIJJIJIGI?FDEIJJJIJJJJJJJJJIJJJJIJIJJJEIJJGHHHHHHHFFFFFEEEECEDD5@CCCDDDDDD?BBDDCDDDDDCDD@	MD:Z:101	PG:Z:MarkDuplicates	DI:i:2271	NM:i:0	AS:i:101	DS:i:2	XS:i:31
+HWI-ST1213:151:C1DTBACXX:2:2109:18011:23563	147	chr1	59256870	60	101M	=59256660	-311	TGAGAACTAATAGAGCTAGAAGAACTCACTCCCTGCCTCACCCCAGGGAGGGCATTACTCTATTCATGAAGGATCTGCTCCCATGGCCCAAACACCTCCCA	DDEEDDEDEDDCDDDDDDDDFC>5DCA<DDDDDDDFFDBBJIFJJJJJHHHIIIHHFJIJJIJJIJIIJJJJJIJJIHGIJJJJJJIIHHHHFDFFFFCCB	MD:Z:101	PG:Z:MarkDuplicates	DI:i:2271	NM:i:0	AS:i:101	DS:i:2	XS:i:31
+HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994	1123	chr1	59256660	60	77M24S	=59256904	311	ATTTATAAAGAAAAAAAAAGGTGTATTTGGCTCATAATTCTGCTGCTTGGAAAGTTCATGATTGGGCATCTGCATCTTGGAAAAGGGGCCCAGGCGGTTTT	B@CFFADFHGHGHJJIJJGHIBGFGIJIJJJJJJJGJJJIIIIJIIJIJJEHFD@CHHEHHEFDBDFCA@###############################	MD:Z:77	PG:Z:MarkDuplicates	DI:i:2271	NM:i:0	AS:i:77	DS:i:2	XS:i:22
+HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994	1171	chr1	59256904	60	34S67M	=59256660	-311	TGAAACCTAATACACCTATACACTCTCCCCCCCCGCCTCACCCCAGAGAGGGCATAACTCTATTCATGAAGCACCTGCCCCGATGCCCCAAACACCTCCCA	######################################################################################@?<2++<+D=D?B;=	MD:Z:12G8T15G1T4T2C3G15	PG:Z:MarkDuplicates	DI:i:2271NM:i:7	AS:i:32	DS:i:2	XS:i:22
+```
+
+so we kind of fixed that by using `alignment.pos - alignment.qstart + 1` but
+that does not handle soft clipping on the mate. This highlights a problem with
+our approach of handling the pair separately; you can end up with one read of
+a pair marked as dupe and the other not:
+
+```
+[conradL@outgrabe streammd]$ samtools view -f 1024 out.sam |grep -P 'HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994|HWI-ST1213:151:C1DTBACXX:2:2109:18011:23563'
+HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994	1171	chr1	59256904	60	34S67M	=59256660	-311	TGAAACCTAATACACCTATACACTCTCCCCCCCCGCCTCACCCCAGAGAGGGCATAACTCTATTCATGAAGCACCTGCCCCGATGCCCCAAACACCTCCCA	######################################################################################@?<2++<+D=D?B;=	NM:i:7	MD:Z:12G8T15G1T4T2C3G15	AS:i:32	XS:i:22
+```
+
+In this case only we didn't get the HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994
+alignment starting at chr1:59256660 marked as a duplicate even though it should
+be.
