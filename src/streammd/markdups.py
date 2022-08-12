@@ -23,7 +23,7 @@ def markdups(bfconfig, headerq, samq, outfd=1):
     Args:
         bfconfig: Bloom filter configuration dict.
         headerq: multiprocessing.Queue to get header.
-        samq: multiprocessing.Queue to get batches of SAM records.
+        samq: multiprocessing.Queue to get batches of paired SAM records.
         outfd: output stream file descriptor (default=1).
 
     Returns:
@@ -35,46 +35,44 @@ def markdups(bfconfig, headerq, samq, outfd=1):
         batch = samq.get()
         if batch == SENTINEL:
             break
-        for line in batch:
-            alignment = AlignedSegment.fromstring(line, header)
-            ends = readends(alignment)
+        for r1, r2 in batch:
+            pair = [AlignedSegment.fromstring(r, header) for r in (r1, r2)]
+            ends = readends(pair)
             if ends and bf.add(ends):
-                alignment.flag += 1024
-            # in contrast to sys.stdout.write, os.write is atomic so we get
-            # whole lines in the output and we don't have to care about
-            # locking or using an output queue
-            os.write(outfd, (alignment.to_string()+'\n').encode('utf-8'))
+                for alignment in pair:
+                    alignment.flag += 1024
+            # Write the pair as a pair. In contrast to sys.stdout.write,
+            # os.write is atomic so we don't have to care about locking or
+            # using an output queue.
+            out = pair[0].to_string() + '\n' + pair[1].to_string() + '\n'
+            os.write(outfd, out.encode('utf-8'))
 
 
-def readends(alignment):
+def readends(pair):
     """
     Generate a signature for a read, symmetric under flip of orientation.
     """
-    flag = alignment.flag
-    read_unmapped = bool(flag & 4)
-    mate_unmapped = bool(flag & 8)
-    read_reverse = bool(flag & 16)
-    mate_reverse = bool(flag & 32)
-    first_in_pair = bool(flag & 64)
-    second_in_pair = bool(flag & 128)
+    r1, r2 = pair
+    assert r1.qname == r2.qname, f'{r1.qname} != {r2.qname}'
     # to start let's just consider mapped pairs
     # TODO: allow single ends to be mapped
-    if read_unmapped or mate_unmapped:
+    if r1.is_unmapped or r2.is_unmapped:
         return None
     # TODO: handle ff and rr pairs
-    if not (read_reverse ^ mate_reverse):
+    if not (r1.is_reverse ^ r2.is_reverse):
         return None
-    ends = (
-        (alignment.reference_name,
-            alignment.reference_start - alignment.query_alignment_start + 1),
-        (alignment.next_reference_name,
-            alignment.next_reference_start))
+    ends = list(sorted((
+        (r1.reference_name, r1.pos - r1.qstart + 1),
+        (r2.reference_name, r2.pos - r2.qstart + 1))))
+    with open('/tmp/readends', 'a') as fh:
+        fh.write(str(ends))
     return f'{ends[0][0]}{ends[0][1]}{ends[1][0]}{ends[1][1]}'
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     """
-    Read records from a SAM file input stream and enqueue them in batches.
+    Read records from a qname-grouped SAM file input stream and enqueue them
+    in batches.
 
     Header lines are written directly to the output stream and also to the
     header queue.
@@ -90,9 +88,18 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     Returns:
         None
     """
-    samlines = []
-    headlines = []
+    # FIXME this doesn't handle reads with secondary and supplementary
+    # alignments
+    def batch(lines):
+        """
+        For a list of reads [r1.1, r1.2, r2.1, r2.2, ...] return the list of
+        pairs [(r1.1, r1.2), (r2.1, r2.2), ...]
+        """
+        return [(r1, r2) for (r1, r2) in zip(lines[::2], lines[1::2])]
+
     header = None
+    headlines = []
+    samlines = []
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
@@ -103,10 +110,10 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
                 for _ in range(nconsumers):
                     headerq.put(header)
             samlines.append(line.strip())
-            if len(samlines) == batchsize:
-                samq.put(samlines)
+            if len(samlines) == 2 * batchsize:
+                samq.put(batch(samlines))
                 samlines = []
-    samq.put(samlines)
+    samq.put(batch(samlines))
     for _ in range(nconsumers):
         samq.put(SENTINEL)
 
