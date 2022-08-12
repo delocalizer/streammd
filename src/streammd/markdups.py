@@ -4,6 +4,7 @@ Mark duplicates on SAM file input stream.
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Queue, Process
 from multiprocessing.managers import SharedMemoryManager
+import logging
 import os
 from bloomfilter import BloomFilter
 from pysam import AlignmentHeader, AlignedSegment
@@ -11,7 +12,61 @@ from pysam import AlignmentHeader, AlignedSegment
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = 1e6
 DEFAULT_NWORKERS = 8
+LOGGER = logging.getLogger(__name__)
 SENTINEL = 'STOP'
+
+
+def markdups(bfconfig, headerq, samq, outfd=1):
+    """
+    Process SAM file records.
+
+    Args:
+        bfconfig: Bloom filter configuration dict.
+        headerq: multiprocessing.Queue to get header.
+        samq: multiprocessing.Queue to get batches of SAM records.
+        outfd: output stream file descriptor (default=1).
+
+    Returns:
+        None
+    """
+    bf = BloomFilter.copy(bfconfig)
+    header = AlignmentHeader.from_text(headerq.get())
+    while True:
+        batch = samq.get()
+        if batch == SENTINEL:
+            break
+        for line in batch:
+            alignment = AlignedSegment.fromstring(line, header)
+            # TODO
+            # 1. create the hashable readends thing.
+            # 2. add it to bf and if already present, mark this as a dupe:
+            #    if bf.add(readends):
+            #        alignment.flag += 1024
+            
+            # in contrast to sys.stdout.write, os.write is atomic so we get
+            # whole lines in the output and we don't have to care about
+            # locking or using an output queue
+            os.write(outfd, (alignment.to_string()+'\n').encode('utf-8'))
+
+
+def readends(alignment):
+    """
+    Generate a signature for a read, symmetric under flip of orientation.
+    """
+    flag = alignment.flag
+    read_unmapped = flag & 4
+    mate_unmapped = flag & 8
+    read_reverse = flag & 16
+    mate_reverse = flag & 32
+    first_in_pair = flag & 64
+    second_in_pair = flag & 128
+    # to start let's just consider mapped pairs
+    # TODO: allow single ends to be mapped
+    if read_unmapped or mate_unmapped:
+        return None
+    # if both are mapped ignore the 2nd in pair as the 1st contains all info.
+    if second_in_pair:
+        return None
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
@@ -51,39 +106,6 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     samq.put(samlines)
     for _ in range(nconsumers):
         samq.put(SENTINEL)
-
-
-def markdups(bfconfig, headerq, samq, outfd=1):
-    """
-    Process SAM file records.
-
-    Args:
-        bfconfig: Bloom filter configuration dict.
-        headerq: multiprocessing.Queue to get header.
-        samq: multiprocessing.Queue to get batches of SAM records.
-        outfd: output stream file descriptor (default=1).
-
-    Returns:
-        None
-    """
-    bf = BloomFilter.copy(bfconfig)
-    header = AlignmentHeader.from_text(headerq.get())
-    while True:
-        batch = samq.get()
-        if batch == SENTINEL:
-            break
-        for line in batch:
-            alignment = AlignedSegment.fromstring(line, header)
-            # TODO
-            # 1. create the hashable readends thing.
-            # 2. add it to bf and if already present, mark this as a dupe:
-            #    if bf.add(readends):
-            #        alignment.flag += 1024
-            
-            # in contrast to sys.stdout.write, os.write is atomic so we get
-            # whole lines in the output and we don't have to care about
-            # locking or using an output queue
-            os.write(outfd, (alignment.to_string()+'\n').encode('utf-8'))
 
 
 def main():
