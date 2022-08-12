@@ -11,7 +11,7 @@ from pysam import AlignmentHeader, AlignedSegment
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = 1e6
-DEFAULT_NWORKERS = 8
+DEFAULT_NWORKERS = 4
 LOGGER = logging.getLogger(__name__)
 SENTINEL = 'STOP'
 
@@ -37,12 +37,9 @@ def markdups(bfconfig, headerq, samq, outfd=1):
             break
         for line in batch:
             alignment = AlignedSegment.fromstring(line, header)
-            # TODO
-            # 1. create the hashable readends thing.
-            # 2. add it to bf and if already present, mark this as a dupe:
-            #    if bf.add(readends):
-            #        alignment.flag += 1024
-            
+            ends = readends(alignment)
+            if ends and bf.add(ends):
+                alignment.flag += 1024
             # in contrast to sys.stdout.write, os.write is atomic so we get
             # whole lines in the output and we don't have to care about
             # locking or using an output queue
@@ -54,19 +51,23 @@ def readends(alignment):
     Generate a signature for a read, symmetric under flip of orientation.
     """
     flag = alignment.flag
-    read_unmapped = flag & 4
-    mate_unmapped = flag & 8
-    read_reverse = flag & 16
-    mate_reverse = flag & 32
-    first_in_pair = flag & 64
-    second_in_pair = flag & 128
+    read_unmapped = bool(flag & 4)
+    mate_unmapped = bool(flag & 8)
+    read_reverse = bool(flag & 16)
+    mate_reverse = bool(flag & 32)
+    first_in_pair = bool(flag & 64)
+    second_in_pair = bool(flag & 128)
     # to start let's just consider mapped pairs
     # TODO: allow single ends to be mapped
     if read_unmapped or mate_unmapped:
         return None
-    # if both are mapped ignore the 2nd in pair as the 1st contains all info.
-    if second_in_pair:
+    # TODO: handle ff and rr pairs
+    if not (read_reverse ^ mate_reverse):
         return None
+    ends = (
+        (alignment.reference_name, alignment.reference_start),
+        (alignment.next_reference_name, alignment.next_reference_start))
+    return f'{ends[0][0]}{ends[0][1]}{ends[1][0]}{ends[1][1]}'
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
