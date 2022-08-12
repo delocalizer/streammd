@@ -70,7 +70,7 @@ def markdups(samq, headerq, outfd=1):
             break
         for line in batch:
             alignment = AlignedSegment.fromstring(line, header)
-            os.write(outfd, (alignment.to_string()+'\n').encode('ascii'))
+            os.write(outfd, (alignment.to_string().strip()+'\n').encode('utf-8'))
 
 
 def main():
