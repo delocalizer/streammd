@@ -11,7 +11,7 @@ DEFAULT_WORKERS = 8
 SENTINEL = 'STOP'
 
 
-def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
+def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     """
     Read records from a SAM file input stream and enqueue them in batches.
 
@@ -19,8 +19,8 @@ def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
     header queue.
 
     Args:
-        samq: multiprocessing.Queue to put SAM records.
         headerq: multiprocessing.Queue to put header.
+        samq: multiprocessing.Queue to put SAM records.
         nconsumers: number of consumer processes.
         batchsize: number of lines per batch in samq (default=50).
         infd: input stream file descriptor (default=0).
@@ -42,7 +42,7 @@ def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
                 header = ''.join(headlines)
                 for _ in range(nconsumers):
                     headerq.put(header)
-            samlines.append(line)
+            samlines.append(line.strip())
             if len(samlines) == batchsize:
                 samq.put(samlines)
                 samlines = []
@@ -51,13 +51,13 @@ def samrecords(samq, headerq, nconsumers, batchsize=50, infd=0, outfd=1):
         samq.put(SENTINEL)
 
 
-def markdups(samq, headerq, outfd=1):
+def markdups(headerq, samq, outfd=1):
     """
     Process SAM file records.
 
     Args:
-        samq: multiprocessing.Queue to get batches of SAM records.
         headerq: multiprocessing.Queue to get header.
+        samq: multiprocessing.Queue to get batches of SAM records.
         outfd: output stream file descriptor (default=1).
 
     Returns:
@@ -70,17 +70,17 @@ def markdups(samq, headerq, outfd=1):
             break
         for line in batch:
             alignment = AlignedSegment.fromstring(line, header)
-            os.write(outfd, (alignment.to_string().strip()+'\n').encode('utf-8'))
+            os.write(outfd, (alignment.to_string()+'\n').encode('utf-8'))
 
 
 def main():
     nconsumers = DEFAULT_WORKERS
+    headerq = Queue(nconsumers)
     samq = Queue(1000)
-    headerq = Queue(10)
-    producer = Process(target=samrecords, args=(samq, headerq, nconsumers))
+    producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
     producer.start()
     consumers = [
-        Process(target=markdups, args=(samq, headerq))
+        Process(target=markdups, args=(headerq, samq))
         for _ in range(nconsumers)
     ]
     list(map(lambda x: x.start(), consumers))
