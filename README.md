@@ -251,3 +251,10 @@ HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994	1171	chr1	59256904	60	34S67M	=5925666
 In this case only we didn't get the HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994
 alignment starting at chr1:59256660 marked as a duplicate even though it should
 be.
+
+So after handling groups 'properly':
+```
+[conradL@outgrabe streammd]$ python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.qname.sam|samtools view -f 1024 -|wc -l
+1978
+```
+now we're only 56 records short, or 97.5% of what Picard gives us.

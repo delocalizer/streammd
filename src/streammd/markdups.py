@@ -35,37 +35,41 @@ def markdups(bfconfig, headerq, samq, outfd=1):
         batch = samq.get()
         if batch == SENTINEL:
             break
-        for r1, r2 in batch:
-            pair = [AlignedSegment.fromstring(r, header) for r in (r1, r2)]
-            ends = readends(pair)
+        for group in batch:
+            alignments = [AlignedSegment.fromstring(r, header) for r in group]
+            ends = readends(alignments)
             if ends and bf.add(ends):
-                for alignment in pair:
-                    alignment.flag += 1024
-            # Write the pair as a pair. In contrast to sys.stdout.write,
+                for a in alignments:
+                    a.flag += 1024
+            # Write the group as a group. In contrast to sys.stdout.write,
             # os.write is atomic so we don't have to care about locking or
             # using an output queue.
-            out = pair[0].to_string() + '\n' + pair[1].to_string() + '\n'
+            out = '\n'.join(a.to_string() for a in alignments) + '\n'
             os.write(outfd, out.encode('utf-8'))
 
 
-def readends(pair):
+def readends(alignments):
     """
     Generate a signature for a read, symmetric under flip of orientation.
     """
-    r1, r2 = pair
-    assert r1.qname == r2.qname, f'{r1.qname} != {r2.qname}'
+    r1, r2 = None, None
+    for alignment in alignments:
+        if not (alignment.is_secondary or alignment.is_supplementary):
+            if not r1:
+                r1 = alignment
+            else:
+                r2 = alignment
+                break
     # to start let's just consider mapped pairs
     # TODO: allow single ends to be mapped
     if r1.is_unmapped or r2.is_unmapped:
         return None
     # TODO: handle ff and rr pairs
-    if not (r1.is_reverse ^ r2.is_reverse):
+    if not r1.is_reverse ^ r2.is_reverse:
         return None
     ends = list(sorted((
         (r1.reference_name, r1.pos - r1.qstart + 1),
         (r2.reference_name, r2.pos - r2.qstart + 1))))
-    with open('/tmp/readends', 'a') as fh:
-        fh.write(str(ends))
     return f'{ends[0][0]}{ends[0][1]}{ends[1][0]}{ends[1][1]}'
 
 
@@ -88,18 +92,11 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     Returns:
         None
     """
-    # FIXME this doesn't handle reads with secondary and supplementary
-    # alignments
-    def batch(lines):
-        """
-        For a list of reads [r1.1, r1.2, r2.1, r2.2, ...] return the list of
-        pairs [(r1.1, r1.2), (r2.1, r2.2), ...]
-        """
-        return [(r1, r2) for (r1, r2) in zip(lines[::2], lines[1::2])]
-
+    group = []
+    groupid = None
     header = None
     headlines = []
-    samlines = []
+    batch = []
     for line in os.fdopen(infd):
         if line.startswith('@'):
             headlines.append(line)
@@ -109,11 +106,20 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
                 header = ''.join(headlines)
                 for _ in range(nconsumers):
                     headerq.put(header)
-            samlines.append(line.strip())
-            if len(samlines) == 2 * batchsize:
-                samq.put(batch(samlines))
-                samlines = []
-    samq.put(batch(samlines))
+            record = line.strip()
+            qname = record.partition('\t')[0]
+            if qname == groupid:
+                group.append(record)
+            else:
+                if group:
+                    batch.append(group)
+                    if len(batch) == batchsize:
+                        samq.put(batch)
+                        batch = []
+                groupid = qname
+                group = [record]
+    batch.append(group)
+    samq.put(batch)
     for _ in range(nconsumers):
         samq.put(SENTINEL)
 
