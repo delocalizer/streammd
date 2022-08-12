@@ -3,7 +3,7 @@ A Bloom filter implementation.
 """
 import logging
 from math import ceil, log
-from multiprocessing.shared_memory import ShareableList, SharedMemory
+from multiprocessing.shared_memory import SharedMemory
 from sys import getsizeof
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
@@ -38,17 +38,14 @@ class BloomFilter:
             n: number of items to add (default=1e9).
             p: false positive rate when n items are added (default=1e-9).
         """
-        m, k = self.optimal_m_k(n, p)
+        self.n, self.p = n, p
+        self.m, self.k = self.optimal_m_k(n, p)
+        self.hash = self.hasher(self.m, self.k)
+
         # set up memory
-        self.shl_vars = smm.ShareableList([None] * 4)
-        self.shm_bits = smm.SharedMemory(getsizeof(bitarray(m)))
+        self.shm_bits = smm.SharedMemory(getsizeof(bitarray(self.m)))
 
         # initialize
-        self.n = self.shl_vars[0] = n
-        self.p = self.shl_vars[1] = p
-        self.m = self.shl_vars[2] = m
-        self.k = self.shl_vars[3] = k
-        self.hash = self.hasher(self.m, self.k)
         self.bits = bitarray(buffer=self.shm_bits.buf)
         self.bits[:] = 0
 
@@ -105,6 +102,16 @@ class BloomFilter:
                 self.bits[pos] = 1
         return present
 
+    @property
+    def config(self):
+        return {
+            'shm_bits': self.shm_bits.name,
+            'n': self.n,
+            'p': self.p,
+            'm': self.m,
+            'k': self.k
+        }
+
     def count(self):
         """
         Return the approximate number of items stored.
@@ -118,25 +125,23 @@ class BloomFilter:
         return ceil((-self.m/self.k) * log(1 - (self.bits.count(1)/self.m)))
 
     @classmethod
-    def copy(cls, shl_vars, shm_bits):
+    def copy(cls, config):
         """
         Copy state from another BloomFilter instance, referencing the same
         shared memory.
 
         Args:
-            shl_vars: name of the template ShareableList instance.
-            shm_bits: name of the template SharedMemory instance.
+            config: configuration dict of the template instance.
 
         Returns:
             BloomFilter
         """
         instance = object.__new__(cls)
-        instance.shl_vars = ShareableList(name=shl_vars)
-        instance.shm_bits = SharedMemory(name=shm_bits)
-        instance.n = instance.shl_vars[0]
-        instance.p = instance.shl_vars[1]
-        instance.m = instance.shl_vars[2]
-        instance.k = instance.shl_vars[3]
+        instance.shm_bits = SharedMemory(name=config['shm_bits'])
+        instance.n = config['n']
+        instance.p = config['p']
+        instance.m = config['m']
+        instance.k = config['k']
         instance.hash = instance.hasher(instance.m, instance.k)
         instance.bits = bitarray(buffer=instance.shm_bits.buf)
         return instance
