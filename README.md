@@ -252,9 +252,46 @@ In this case only we didn't get the HWI-ST1213:151:C1DTBACXX:2:2109:2472:34994
 alignment starting at chr1:59256660 marked as a duplicate even though it should
 be.
 
-So after handling groups 'properly':
+So after handling groups properly:
 ```
 [conradL@outgrabe streammd]$ python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.qname.sam|samtools view -f 1024 -|wc -l
 1978
 ```
 now we're only 56 records short, or 97.5% of what Picard gives us.
+
+
+I now realized that I wasn't actually calculating the _ends_ of the fragment
+but the starts of the two reads normalized to fwd direction. To properly
+calculate ends of a fragment (where one each is fwd&reverse) one must account
+for soft clips at the ends.
+
+Now after handling ends properly, we get 2034 (using 1 worker; if using more we
+sometimes get a few less; it's non-deterministic depending on how the individual
+threads happen to process the batches they get):
+
+```
+python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.qname.sam |samtools view -f 1024 |wc -l
+2034
+```
+
+which is pretty awesome! It turns out we're still not exactly concordant with
+picard though because we correctly mark an extra 2 they don't, and also miss
+two they correctly mark. The two we pick up are one additional supplementary
+alignment for each of these qnames:
+```
+      HWI-ST1213:151:C1DTBACXX:2:2108:18398:59522
+      HWI-ST1213:151:C1DTBACXX:2:2115:19634:36877
+```
+(because we work on qname-grouped SAM so can correctly mark the supp reads).
+
+The two we miss are these where they are RR reads which we explicitly don't
+handle at the moment:
+```
+HWI-ST1213:151:C1DTBACXX:2:1115:4063:39527      1137    chr1    36733689        60      98M     =        36734541        856     GAGAATCGCTTGAACCCAAGAGGTGAAGATTGTAGTGAGCTGAGATCATGTGCCACTGTACTCCAGCCTGGGCAACAGTGCGAGACTCTGTCTCAAAA       DDDBB@DCADCA=;A<DEEEFDFFFFFHHHHHJJJJJJIJJIJJJFGJJJJIIGBHGHFFIGJJIJIGGJJIIGHGGIIJJJIGHHHHHHFFFFFCCC       MD:Z:7A32C57    PG:Z:MarkDuplicates     DI:i:1327        NM:i:2  AS:i:88 DS:i:2  XS:i:39
+HWI-ST1213:151:C1DTBACXX:2:1216:11780:52345     113     chr1    36733689        60      98M     =        36734541        856     GAGAATCGCTTGAACCCAAGAGGTGAAGATTGTAGTGAGCTGAGATCATGTGCCACTGTACTCCAGCCTGGGCAACAGTGCGAGACTCTGTCTCAAAA       DDDDDBDDDDDB@=DEDEEEFFFFFFFHHHGGJJJIJJJJJJJJJIJJJHJJJIIIGHGDIHJJJJJJIJJJJGHJJJGJIJJHHHHHHHFFFFFCCC       MD:Z:7A32C57    PG:Z:MarkDuplicates     DI:i:1327        NM:i:2  AS:i:88 DS:i:2  XS:i:39
+HWI-ST1213:151:C1DTBACXX:2:1115:4063:39527      1201    chr1    36734541        60      101M    =        36733689        -856    GGCCTCAAACTCCTGGCCTCAGGTGATCCACCTGCCTCGGCCTCTGAAAGTGCTGGGATTACAGGTATGAGCCACCGCGCCCAGCCGAGTTAGTTTTTTAA    <<DBACA>3<?DDDD@?9CCADDDDDABC?BDDDDDDDDDDCEEFFFFFEEGHGIIGGGIHJJJIGIHGJJJIHJJJIJIJIHIEIJHHHFHHFFFFFCC@    MD:Z:101        PG:Z:MarkDuplicates     DI:i:1327        NM:i:0  AS:i:101        DS:i:2  XS:i:55
+HWI-ST1213:151:C1DTBACXX:2:1216:11780:52345     177     chr1    36734541        60      101M    =        36733689        -856    GGCCTCAAACTCCTGGCCTCAGGTGATCCACCTGCCTCGGCCTCTGAAAGTGCTGGGATTACAGGTATGAGCCACCGCGCCCAGCCGAGTTAGTTTTTTAA    ?BC@>ACA9BBB?DDDDCCCC?C?DDAB@8DDDDDDDDDDDEEEFFFEFDAGEEGJIIIIJJJIJIGIJIIJIGJJIGIIJGJIJJIHHHFHHFFFFFCC@    MD:Z:101        PG:Z:MarkDuplicates     DI:i:1327        NM:i:0  AS:i:101        DS:i:2  XS:i:55
+```
+
+
+

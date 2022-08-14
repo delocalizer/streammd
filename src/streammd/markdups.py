@@ -11,7 +11,7 @@ from pysam import AlignmentHeader, AlignedSegment
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = 1e6
-DEFAULT_NWORKERS = 4
+DEFAULT_NWORKERS = 1
 LOGGER = logging.getLogger(__name__)
 SENTINEL = 'STOP'
 
@@ -50,16 +50,19 @@ def markdups(bfconfig, headerq, samq, outfd=1):
 
 def readends(alignments):
     """
-    Generate a signature for a read, symmetric under flip of orientation.
+    Calculate ends of the fragment, accounting for soft-clipped bases.
+
+    Args:
+        alignments: qname group tuple of AlignedSegment instances.
     """
     r1, r2 = None, None
+    # pick the primary alignments
     for alignment in alignments:
         if not (alignment.is_secondary or alignment.is_supplementary):
-            if not r1:
+            if alignment.is_read1:
                 r1 = alignment
-            else:
+            elif alignment.is_read2:
                 r2 = alignment
-                break
     # to start let's just consider mapped pairs
     # TODO: allow single ends to be mapped
     if r1.is_unmapped or r2.is_unmapped:
@@ -67,10 +70,17 @@ def readends(alignments):
     # TODO: handle ff and rr pairs
     if not r1.is_reverse ^ r2.is_reverse:
         return None
-    ends = list(sorted((
-        (r1.reference_name, r1.pos - r1.qstart + 1),
-        (r2.reference_name, r2.pos - r2.qstart + 1))))
-    return f'{ends[0][0]}{ends[0][1]}{ends[1][0]}{ends[1][1]}'
+    fwd, rev = (r1, r2) if r2.is_reverse else (r2, r1)
+    ends = [
+                                                 # include leading soft clips
+        (fwd.reference_name, fwd.reference_start - fwd.query_alignment_start),
+                                                 # include trailing soft clips
+        (rev.reference_name, rev.reference_end + (rev.query_length -
+                                                  rev.query_alignment_end))
+    ]
+    ends.sort()
+    left, right = ends
+    return f'{left[0]}{left[1]}{right[0]}{right[1]}'
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
