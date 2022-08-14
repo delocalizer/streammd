@@ -295,3 +295,15 @@ HWI-ST1213:151:C1DTBACXX:2:1216:11780:52345     177     chr1    36734541        
 
 
 
+working out:
+```
+python src/streammd/markdups.py < scratch/1000.DI.n_gt_1.qname.sam > out.sam
+samtools view -f 1024 out.sam |sort -k1,1 -k2n,2n|cut -f1|sort|uniq -c > out.counts
+comm -23 <(sort out.counts) <(sort picard.counts)|grep -v ' 2 ' > out.private
+comm -13 <(sort out.counts) <(sort picard.counts) > picard.private
+grep -f <(awk '{print $2}' out.private) picard.private > out_picard_intersection.different_n
+grep -f <(awk '{print $2}' picard.private) scratch/1000.DI.n_gt_1.coord.MD.sam | grep -oP 'DI:i:\d+'|sort|uniq|while read di; do ids=$(grep "   $di     " scratch/1000.DI.n_gt_1.coord.MD.sam|cut -f1); for id in $ids; do echo "$id    $di"; done; done|sort -k9n,9n -t':' > picard.private.DI.sorted
+grep -oP 'DI:i:\d+' scratch/1000.DI.n_gt_1.coord.MD.sam|sort -k3n,3n -t':'|uniq|while read DI; do ids=$(grep "  $DI     " scratch/1000.DI.n_gt_1.coord.MD.sam|cut -f1); echo $DI $ids; done > 1000.DI.ids
+grep -vf <(awk '{print $2}' out.counts) 1000.DI.ids > DIs.not_in_out
+grep -f <(cut -f1 -d ' ' DIs.not_in_out|while read di; do echo "        $di     "; done) scratch/1000.DI.n_gt_1.coord.MD.sam > DI.records.not_in_out
+```
