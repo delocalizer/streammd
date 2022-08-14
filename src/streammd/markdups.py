@@ -63,24 +63,24 @@ def readends(alignments):
                 r1 = alignment
             elif alignment.is_read2:
                 r2 = alignment
-    # to start let's just consider mapped pairs
     # TODO: allow single ends to be mapped
     if r1.is_unmapped or r2.is_unmapped:
         return None
-    # TODO: handle ff and rr pairs
-    if not r1.is_reverse ^ r2.is_reverse:
-        return None
-    fwd, rev = (r1, r2) if r2.is_reverse else (r2, r1)
-    ends = [
-                                                 # include leading soft clips
-        (fwd.reference_name, fwd.reference_start - fwd.query_alignment_start),
-                                                 # include trailing soft clips
-        (rev.reference_name, rev.reference_end + (rev.query_length -
-                                                  rev.query_alignment_end))
-    ]
+    ends = [None, None]
+    for i, r in enumerate((r1, r2)):
+        if r.is_forward:
+            leading_S = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
+                                                          # leading soft clips
+            ends[i] = r.reference_name, r.reference_start - leading_S
+        else:
+            trailing_S = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
+                                                        # trailing soft clips
+            ends[i] = r.reference_name, r.reference_end + trailing_S
+    orientation = '^' if r1.is_reverse ^ r2.is_reverse else '='
+    # define canonical ordering: l < r
     ends.sort()
-    left, right = ends
-    return f'{left[0]}{left[1]}{right[0]}{right[1]}'
+    (l_rname, l_pos), (r_rname, r_pos) = ends
+    return f'{orientation}{l_rname}{l_pos}{r_rname}{r_pos}'
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
