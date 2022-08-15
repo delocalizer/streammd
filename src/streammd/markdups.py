@@ -1,19 +1,91 @@
 """
-Mark duplicates on SAM file input stream.
+Read a SAM file from STDIN, mark duplicates in a single pass and stream
+processed records to STDOUT.
+
+Input must begin with a valid SAM header, followed by qname-grouped records.
+Currently only paired reads are handled.
+
+Default log level is 'INFO' — set to something else with the LOG_LEVEL
+environment variable.
 """
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Queue, Process
 from multiprocessing.managers import SharedMemoryManager
+import argparse
 import logging
 import os
-from bloomfilter import BloomFilter
+import sys
 from pysam import AlignmentHeader, AlignedSegment
+from .bloomfilter import BloomFilter
 
 DEFAULT_FPRATE = 1e-6
-DEFAULT_NITEMS = 1e9
+DEFAULT_NITEMS = int(1e9)
 DEFAULT_NWORKERS = 10
+DEFAULT_SAMQSIZE = 1000
+
 LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+LOGGER.addHandler(logging.StreamHandler())
+
+MSG_COUNT = 'qnames seen: %s'
+MSG_UNIQUE = 'approximate count of unique pairs: %s'
+MSG_DUPLICATES = 'approximate duplicate fraction: %0.4f'
 SENTINEL = 'STOP'
+
+
+def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
+    """
+    Read records from a qname-grouped SAM file input stream and enqueue them
+    in batches.
+
+    Header lines are written directly to the output stream and also to the
+    header queue.
+
+    Args:
+        headerq: multiprocessing.Queue to put header.
+        samq: multiprocessing.Queue to put SAM records.
+        nconsumers: number of consumer processes.
+        batchsize: number of lines per batch in samq (default=50).
+        infd: input stream file descriptor (default=0).
+        outfd: output stream file descriptor (default=1).
+
+    Returns:
+        None
+    """
+    count = 0
+    group = []
+    groupid = None
+    header = None
+    headlines = []
+    batch = []
+    for line in os.fdopen(infd):
+        if line.startswith('@'):
+            headlines.append(line)
+            os.write(outfd, line.encode('ascii'))
+        else:
+            if not header:
+                header = ''.join(headlines)
+                for _ in range(nconsumers):
+                    headerq.put(header)
+            record = line.strip()
+            qname = record.partition('\t')[0]
+            if qname == groupid:
+                group.append(record)
+            else:
+                if group:
+                    batch.append(group)
+                    count += 1
+                    if len(batch) == batchsize:
+                        samq.put(batch)
+                        batch = []
+                groupid = qname
+                group = [record]
+    batch.append(group)
+    count += 1
+    samq.put(batch)
+    for _ in range(nconsumers):
+        samq.put(SENTINEL)
+    samq.put(count)
 
 
 def markdups(bfconfig, headerq, samq, outfd=1):
@@ -83,139 +155,59 @@ def readends(alignments):
     return f'{orientation}{l_rname}{l_pos}{r_rname}{r_pos}'
 
 
-def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
+def parse_cmdargs(args):
     """
-    Read records from a qname-grouped SAM file input stream and enqueue them
-    in batches.
-
-    Header lines are written directly to the output stream and also to the
-    header queue.
-
-    Args:
-        headerq: multiprocessing.Queue to put header.
-        samq: multiprocessing.Queue to put SAM records.
-        nconsumers: number of consumer processes.
-        batchsize: number of lines per batch in samq (default=50).
-        infd: input stream file descriptor (default=0).
-        outfd: output stream file descriptor (default=1).
-
-    Returns:
-        None
+    Returns: Parsed arguments
     """
-    group = []
-    groupid = None
-    header = None
-    headlines = []
-    batch = []
-    for line in os.fdopen(infd):
-        if line.startswith('@'):
-            headlines.append(line)
-            os.write(outfd, line.encode('ascii'))
-        else:
-            if not header:
-                header = ''.join(headlines)
-                for _ in range(nconsumers):
-                    headerq.put(header)
-            record = line.strip()
-            qname = record.partition('\t')[0]
-            if qname == groupid:
-                group.append(record)
-            else:
-                if group:
-                    batch.append(group)
-                    if len(batch) == batchsize:
-                        samq.put(batch)
-                        batch = []
-                groupid = qname
-                group = [record]
-    batch.append(group)
-    samq.put(batch)
-    for _ in range(nconsumers):
-        samq.put(SENTINEL)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('-n', '--n-items',
+                        type=int,
+                        default=DEFAULT_NITEMS,
+                        help=('expected maximum number of read pairs n '
+                              f'(default={DEFAULT_NITEMS}).'))
+    parser.add_argument('-p', '--fp-rate',
+                        type=float,
+                        default=DEFAULT_FPRATE,
+                        help=('target maximum false positive rate when n '
+                              f'items are stored (default={DEFAULT_FPRATE}).'))
+    parser.add_argument('--consumer-processes',
+                        type=int,
+                        default=DEFAULT_NWORKERS,
+                        help=('Number of hashing processes '
+                              f'(default={DEFAULT_NWORKERS}).'))
+    parser.add_argument('--queue-size',
+                        type=int,
+                        default=DEFAULT_SAMQSIZE,
+                        help=('size of the SAM record queue '
+                              f'(default={DEFAULT_SAMQSIZE})'))
+    return parser.parse_args(args)
 
 
 def main():
-
-    nconsumers = DEFAULT_NWORKERS
-    headerq = Queue(nconsumers)
-    samq = Queue(1000)
-    producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
+    """
+    Run as CLI script
+    """
+    args = parse_cmdargs(sys.argv[1:])
+    headerq = Queue(args.consumer_processes)
+    samq = Queue(args.queue_size)
+    producer = Process(target=samrecords,
+                       args=(headerq, samq, args.consumer_processes))
     producer.start()
     with SharedMemoryManager() as smm:
-        nitems = DEFAULT_NITEMS
-        fprate = DEFAULT_FPRATE
-        bf = BloomFilter(smm, nitems, fprate)
+        bf = BloomFilter(smm, args.n_items, args.fp_rate)
         consumers = [
             Process(target=markdups, args=(bf.config, headerq, samq))
-            for _ in range(nconsumers)
+            for _ in range(args.consumer_processes)
         ]
         list(map(lambda x: x.start(), consumers))
         list(map(lambda x: x.join(), consumers))
+        n_qname = samq.get()
+        n_unique = bf.count()
         producer.join()
+    LOGGER.info(MSG_COUNT % n_qname)
+    LOGGER.info(MSG_UNIQUE % n_unique)
+    LOGGER.info(MSG_DUPLICATES % ((n_qname - n_unique)/n_qname))
 
 
 if __name__ == '__main__':
     main()
-
-#from random import shuffle
-#
-#def add_batch(bf_config, items):
-#    bf = BloomFilter.copy(bf_config)
-#    dupes = 0
-#    for item in items:
-#        present = bf.add(item)
-#        if present:
-#            dupes += 1
-#    return dupes
-#
-#
-#def main():
-#    """
-#    Test it
-#    """
-#    nconsumers = 1 
-#    with SharedMemoryManager() as smm,\
-#            ProcessPoolExecutor(max_workers=nconsumers) as ppe:
-#
-#        target_size = int(1e7)
-#        bf = BloomFilter(smm, target_size, 1e-7)
-#
-#        # Here we assume we know the list of items in advance, so we can
-#        # construct N chunks of items in advance. When we're reading through a
-#        # bam in real time that won't be the case but we can do something like
-#        # create 1 reader per contig, so 'items' is the list of contigs and
-#        # the mapped func takes a contig name as an argument. TODO What to do
-#        # for coordinate unsorted bams though?
-#
-#        # this creates 4 duplicates of every unique value
-#        items = list(str(i) for i in range(int(target_size/5))) * 5
-#        shuffle(items)
-#
-#
-#        def chunker(l, n):
-#            """
-#            yield striped chunks
-#            """
-#            for i in range(0, n):
-#                yield l[i::n]
-#
-#        chunks = chunker(items, nconsumers)
-#
-#        batch_args = ((bf.config, chunk) for chunk in chunks)
-#        dupes = ppe.map(add_batch, *zip(*batch_args))
-#        ppe.shutdown()
-#
-#        print(f'{len(items)} total items added (true)')
-#        print(f'{bf.count()} unique items added (approx)')
-#        print(f'{sum(dupes)} duplicates')
-#        check = [0, 1, 10, 100, 1000, 10000, 100000, 1000000, 2000000, 10000000]
-#        for j in check:
-#            in_filt = str(j) in bf
-#            print(f'{j} {"is" if in_filt else "is NOT"} present')
-#    #for k in range(target_size, 2*target_size):
-#    #    in_filt = str(k) in bf
-#    #    if in_filt:
-#    #        print(f'FP {k}')
-#
-#if __name__ == '__main__':
-#    main()
