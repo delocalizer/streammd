@@ -10,8 +10,8 @@ from bloomfilter import BloomFilter
 from pysam import AlignmentHeader, AlignedSegment
 
 DEFAULT_FPRATE = 1e-6
-DEFAULT_NITEMS = 1e6
-DEFAULT_NWORKERS = 1
+DEFAULT_NITEMS = 1e9
+DEFAULT_NWORKERS = 10
 LOGGER = logging.getLogger(__name__)
 SENTINEL = 'STOP'
 
