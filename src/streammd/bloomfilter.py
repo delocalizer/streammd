@@ -7,7 +7,7 @@ from multiprocessing.shared_memory import SharedMemory
 from sys import getsizeof
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
-from farmhash import hash64withseed
+from farmhash import FarmHash64WithSeed
 
 
 LOGGER = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class BloomFilter:
         seeds = list(seeds) if seeds else sorted(list(PRIMES[:k]))
         assert len(seeds) == k
         def _hasher(item):
-            return [hash64withseed(item, seed) % m for seed in seeds]
+            return [FarmHash64WithSeed(item, seed) % m for seed in seeds]
         return _hasher
 
     @classmethod
