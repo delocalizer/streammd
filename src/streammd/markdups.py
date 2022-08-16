@@ -8,6 +8,7 @@ Currently only paired reads are handled.
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
+from importools import metadata
 from itertools import repeat
 from multiprocessing import Manager, Pool, Process
 from multiprocessing.managers import SharedMemoryManager
@@ -20,7 +21,7 @@ from .bloomfilter import BloomFilter
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = int(1e9)
-DEFAULT_NWORKERS = 10
+DEFAULT_NWORKERS = 8
 DEFAULT_SAMQSIZE = 1000
 
 LOGGER = logging.getLogger(__name__)
@@ -181,6 +182,9 @@ def parse_cmdargs(args):
                         default=DEFAULT_SAMQSIZE,
                         help=('size of the SAM record queue '
                               f'(default={DEFAULT_SAMQSIZE})'))
+    parser.add_argument('--version',
+                        action='version',
+                        version=metadata.version('mumbai'))
     return parser.parse_args(args)
 
 
