@@ -8,7 +8,7 @@ Currently only paired reads are handled.
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
-from importools import metadata
+from importlib import metadata
 from itertools import repeat
 from multiprocessing import Manager, Pool, Process
 from multiprocessing.managers import SharedMemoryManager
@@ -184,7 +184,7 @@ def parse_cmdargs(args):
                               f'(default={DEFAULT_SAMQSIZE})'))
     parser.add_argument('--version',
                         action='version',
-                        version=metadata.version('mumbai'))
+                        version=metadata.version('streammd'))
     return parser.parse_args(args)
 
 
