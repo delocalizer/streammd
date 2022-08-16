@@ -102,6 +102,26 @@ class BloomFilter:
                 self.bits[pos] = 1
         return present
 
+    def add_pair(self, item1, item2):
+        """
+        Add each item in the pair as well as the pair itself in an efficient
+        manner.
+
+        Returns True if the pair itself is already present, False otherwise.
+        """
+        h1 = self.hash(item1)
+        h2 = self.hash(item2)
+        for pos in h1 + h2:
+            self.bits[pos] = 1
+        # See https://stackoverflow.com/a/27952689/6705037
+        h12 = [(3*a + b) % self.m for a, b in zip(h1, h2)]
+        present = True
+        for pos in h12:
+            if self.bits[pos] == 0:
+                present = False
+                self.bits[pos] = 1
+        return present
+
     @property
     def config(self):
         return {

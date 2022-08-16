@@ -28,12 +28,16 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 LOGGER.addHandler(logging.StreamHandler())
 
+MSG_DUPFRAC = 'duplicate fraction: %0.4f'
+MSG_NALIGN = 'alignments seen: %s'
+MSG_NDUP = 'duplicates marked: %s'
 MSG_NQNAME = 'qnames seen: %s'
-MSG_NUNIQUE = 'approximate count of unique pairs: %s'
-MSG_NDUP = 'approximate count of duplicates: %s'
-MSG_DUPFRAC = 'approximate duplicate fraction: %0.4f'
+MSG_NUNIQUE = 'approximate n of stored items (templates + read ends):  %s'
 MSG_VERSION = 'streammd version %s'
+
+DEL = b'\x7f'.decode('ascii') # sorts last in ascii
 SENTINEL = 'STOP'
+UNMAPPED = (DEL, None, None)
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
@@ -102,25 +106,36 @@ def markdups(bfconfig, headerq, samq, outfd=1):
     """
     bf = BloomFilter.copy(bfconfig)
     header = AlignmentHeader.from_text(headerq.get())
-    n_qname, n_dup = 0, 0
+    n_qname, n_align, n_dup = 0, 0, 0
     while True:
         batch = samq.get()
         if batch == SENTINEL:
             break
         for group in batch:
             n_qname += 1
+            n_align += len(group)
             alignments = [AlignedSegment.fromstring(r, header) for r in group]
-            ends = readends(alignments)
-            if ends and bf.add(ends):
-                n_dup += 1
+            if not (ends := readends(alignments)):
+                continue
+            ends_str = ['_'.join(str(x) for x in end) for end in ends]
+            if ends[1] == UNMAPPED and bf.add(ends_str[0]):
+                # replicate Picard MarkDuplicates behaviour: only the
+                # aligned read is marked as duplicate.
+                for a in alignments:
+                    if a.is_mapped:
+                        a.flag += 1024
+                        n_dup += 1
+            elif bf.add_pair(*ends_str):
                 for a in alignments:
                     a.flag += 1024
+                    n_dup += 1
+
             # Write the group as a group. In contrast to sys.stdout.write,
             # os.write is atomic so we don't have to care about locking or
             # using an output queue.
             out = '\n'.join(a.to_string() for a in alignments) + '\n'
             os.write(outfd, out.encode('ascii'))
-    return (n_qname, n_dup)
+    return (n_qname, n_align, n_dup)
 
 
 def readends(alignments):
@@ -130,32 +145,36 @@ def readends(alignments):
     Args:
         alignments: qname group tuple of AlignedSegment instances.
     """
-    r1, r2 = None, None
+    r12 = [None, None]
+
     # pick the primary alignments
     for alignment in alignments:
         if not (alignment.is_secondary or alignment.is_supplementary):
             if alignment.is_read1:
-                r1 = alignment
+                r12[0] = alignment
             elif alignment.is_read2:
-                r2 = alignment
-    ends = [None, None]
-    # TODO: allow single ends to be mapped
-    if r1.is_unmapped or r2.is_unmapped:
+                r12[1] = alignment
+
+    # bail if neither read aligns
+    if all(r.is_unmapped for r in r12):
         return None
-    for i, r in enumerate((r1, r2)):
-        if r.is_forward:
+
+    ends = [UNMAPPED, UNMAPPED]
+    for i, r in enumerate(r12):
+        if r.is_unmapped:
+            pass
+        elif r.is_forward:
+            # leading soft clips
             front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-                                                          # leading soft clips
-            ends[i] = r.reference_name, r.reference_start - front_s
-        else:
+            ends[i] = r.reference_name, r.reference_start - front_s, 'F'
+        elif r.is_reverse:
+            # trailing soft clips
             back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-                                                        # trailing soft clips
-            ends[i] = r.reference_name, r.reference_end + back_s
-    orientation = '^' if r1.is_reverse ^ r2.is_reverse else '='
-    # canonical ordering: l < r
+            ends[i] = r.reference_name, r.reference_end + back_s, 'R'
+
+    # canonical ordering: l < r and UNMAPPED is always last
     ends.sort()
-    (l_rname, l_pos), (r_rname, r_pos) = ends
-    return f'{orientation}{l_rname}{l_pos}{r_rname}{r_pos}'
+    return ends
 
 
 def parse_cmdargs(args):
@@ -206,13 +225,14 @@ def main():
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
         mdargs = repeat((bf.config, headerq, samq), nconsumers)
         counts = pool.starmap(markdups, mdargs)
-        n_qname, n_dup = [sum(col) for col in zip(*counts)]
+        n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
         n_unique = bf.count()
         producer.join()
-    LOGGER.info(MSG_NQNAME, n_qname)
     LOGGER.info(MSG_NUNIQUE, n_unique)
+    LOGGER.info(MSG_NQNAME, n_qname)
+    LOGGER.info(MSG_NALIGN, n_align)
     LOGGER.info(MSG_NDUP, n_dup)
-    LOGGER.info(MSG_DUPFRAC, (n_dup/n_qname))
+    LOGGER.info(MSG_DUPFRAC, (n_dup/n_align))
 
 
 if __name__ == '__main__':

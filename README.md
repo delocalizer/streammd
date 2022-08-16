@@ -5,8 +5,8 @@
 Single-pass duplicate marking with a Bloom filter. This is a probabilistic
 approach to duplicate detection with the following features:
 
- * very fast (typically four to five times faster than Picard MarkDuplicates)
- * low in resources (5GB for 1B input reads)
+ * very fast (typically 2-3x faster than Picard MarkDuplicates)
+ * low memory use (approx 5GB for 300M read pairs)
  * tunable target false positive rate
  * streaming input and output
 
@@ -42,9 +42,11 @@ streammd --help
 ```
 
 1. mark duplicates on an input SAM file record stream 
-```
+
+```bash
 samtools view -h some.bam|streammd
 ```
+
 ## Notes
 
 ### Memory usage
@@ -71,13 +73,20 @@ maximum false positive rate `p`:
 |1.00E+09 |1.00E-08 |4.4634GB   |
 |1.00E+09 |1.00E-09 |5.0213GB   |
 
+For calculating `n`, multiply the number of read pairs in the input by 3
+because for each template 3 items are stored: 2 x read ends and 1 x template
+ends.
+
+For example; 60x human WGS 2x150bp paired-end sequencing ~> 6e8 templates ~> n = 1.8e9
+
 ### Handling outputs
 
-When using the default number of consumer processes `streammd` generates
-outputs to STDOUT extremely rapidly. This can mean the bottleneck in a
-workflow becomes anything downstream of it — for example, if you want
-to write the outputs to bam format using `samtools view` you should use
-8 or more compression threads for optimal speed:
-```
+When using the default number of consumer processes `streammd` writes outputs
+to STDOUT extremely rapidly. In a pipeline this can mean anything downstream
+will become a bottleneck if it can't consume the inputs fast enough — for
+example, if you want to write the outputs to bam format using `samtools view`
+you should use 8 or more compression threads for optimal speed:
+
+```bash
 samtools view -h some.bam|streammd|samtools view -h -@8 -o some.MD.bam
 ```
