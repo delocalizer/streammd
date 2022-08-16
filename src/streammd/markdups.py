@@ -32,6 +32,7 @@ MSG_NQNAME = 'qnames seen: %s'
 MSG_NUNIQUE = 'approximate count of unique pairs: %s'
 MSG_NDUP = 'approximate count of duplicates: %s'
 MSG_DUPFRAC = 'approximate duplicate fraction: %0.4f'
+MSG_VERSION = 'streammd version %s'
 SENTINEL = 'STOP'
 
 
@@ -193,6 +194,7 @@ def main():
     Run as CLI script
     """
     args = parse_cmdargs(sys.argv[1:])
+    LOGGER.info(MSG_VERSION, metadata.version('streammd'))
     LOGGER.info(' '.join(sys.argv))
     manager = Manager()
     headerq = manager.Queue(args.consumer_processes)
