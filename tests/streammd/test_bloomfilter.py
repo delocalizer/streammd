@@ -2,69 +2,110 @@
 Test bloomfilter module
 """
 from multiprocessing.managers import SharedMemoryManager
-from concurrent.futures import ProcessPoolExecutor
-from random import shuffle
-from bloomfilter import BloomFilter
+from unittest import TestCase
+
+from streammd.bloomfilter import BloomFilter
 
 
-def add_batch(bf_config, items):
-    bf = BloomFilter.copy(bf_config)
-    dupes = 0
-    for item in items:
-        present = bf.add(item)
-        if present:
-            dupes += 1
-    return dupes
-
-
-def main():
+class TestBloomFilter(TestCase):
     """
-    Test it
+    Test bloomfilter module functions
     """
-    nconsumers = 1
-    with SharedMemoryManager() as smm,\
-            ProcessPoolExecutor(max_workers=nconsumers) as ppe:
 
-        target_size = int(1e7)
-        bf = BloomFilter(smm, target_size, 1e-7)
+    def test_contains_false(self):
+        """
+        Confirm that 'in' returns False when value is not present.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e3, 1e-3
+            value = 'test value'
+            bf = BloomFilter(smm, n, p)
+            self.assertFalse(value in bf)
 
-        # Here we assume we know the list of items in advance, so we can
-        # construct N chunks of items in advance. When we're reading through a
-        # bam in real time that won't be the case but we can do something like
-        # create 1 reader per contig, so 'items' is the list of contigs and
-        # the mapped func takes a contig name as an argument. TODO What to do
-        # for coordinate unsorted bams though?
+    def test_contains_true(self):
+        """
+        Confirm that 'in' returns True when value is present.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e3, 1e-3
+            value = 'test value'
+            bf = BloomFilter(smm, n, p)
+            bf.add(value)
+            self.assertTrue(value in bf)
 
-        # this creates 4 duplicates of every unique value
-        items = list(str(i) for i in range(int(target_size/5))) * 5
-        shuffle(items)
+    def test_add_false(self):
+        """
+        Confirm that adding a value already present returns False.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e3, 1e-3
+            value = 'test value'
+            bf = BloomFilter(smm, n, p)
+            bf.add(value)
+            self.assertFalse(bf.add(value))
 
+    def test_add_true(self):
+        """
+        Confirm that adding a value to empty filter returns True.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e3, 1e-3
+            value = 'test value'
+            bf = BloomFilter(smm, n, p)
+            self.assertTrue(bf.add(value))
 
-        def chunker(l, n):
-            """
-            yield striped chunks
-            """
-            for i in range(0, n):
-                yield l[i::n]
+    def test_count(self):
+        """
+        Confirm that BloomFilter.count returns approximately the number of
+        elements added to it.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e4, 1e-4
+            values = [str(i) for i in range(10000, 11000)]
+            bf = BloomFilter(smm, n, p)
+            for value in values:
+                bf.add(value)
+            self.assertAlmostEqual(bf.count()/len(values), 1.0, places=2)
 
-        chunks = chunker(items, nconsumers)
+    def test_optimal_m_k(self):
+        """
+        Confirm that m, k calculation performs as expected.
+        """
+        values = (
+            (1e6, 1e-06, 28755176, 20),
+            (1e7, 1e-07, 335477044, 24),
+            (1e8, 1e-08, 3834023351, 27),
+            (1e9, 1e-06, 28755175133, 20),
+        )
+        for n, p, m_expected, k_expected in values:
+            m, k = BloomFilter.optimal_m_k(n, p)
+            self.assertEqual(m, m_expected)
+            self.assertEqual(k, k_expected)
 
-        batch_args = ((bf.config, chunk) for chunk in chunks)
-        dupes = ppe.map(add_batch, *zip(*batch_args))
-        ppe.shutdown()
+    def test_fnr_0(self):
+        """
+        Add n values and check that FNR = 0.
+        """
+        with SharedMemoryManager() as smm:
+            n, p = 1e4, 1e-4
+            values = [str(i) for i in range(10000, 11000)]
+            bf = BloomFilter(smm, n, p)
+            for value in values:
+                bf.add(value)
+            self.assertTrue(all(test in bf for test in values))
 
-        print(f'{len(items)} total items added (true)')
-        print(f'{bf.count()} unique items added (approx)')
-        print(f'{sum(dupes)} duplicates')
-        check = [0, 1, 10, 100, 1000, 10000, 100000, 1000000, 2000000, 10000000]
-        for j in check:
-            in_filt = str(j) in bf
-            print(f'{j} {"is" if in_filt else "is NOT"} present')
-    #for k in range(target_size, 2*target_size):
-    #    in_filt = str(k) in bf
-    #    if in_filt:
-    #        print(f'FP {k}')
-
-
-if __name__ == '__main__':
-    main()
+    def test_fpr_p(self):
+        """
+        Add n values and check that FPR is within expected limit.
+        """
+        with SharedMemoryManager() as smm:
+            n = 1e5
+            ps = (1e-3, 1e-4, 1e-5)
+            values = [str(i) for i in range(int(n), 2*int(n))]
+            misses = [str(i) for i in range(2*int(n), 3*int(n))]
+            for p in ps:
+                bf = BloomFilter(smm, n, p)
+                for value in values:
+                    bf.add(value)
+                fpr = sum(test in bf for test in misses) / len(misses)
+                self.assertLessEqual(fpr, p)
