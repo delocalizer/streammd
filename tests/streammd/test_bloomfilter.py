@@ -1,5 +1,5 @@
 """
-Test bloomfilter module
+Test bloomfilter module.
 """
 from multiprocessing.managers import SharedMemoryManager
 from unittest import TestCase
@@ -9,7 +9,7 @@ from streammd.bloomfilter import BloomFilter
 
 class TestBloomFilter(TestCase):
     """
-    Test bloomfilter module functions
+    Test bloomfilter module functions.
     """
 
     def test_contains_false(self):
