@@ -5,6 +5,7 @@ import logging
 from math import ceil, log
 from multiprocessing.shared_memory import SharedMemory
 from sys import getsizeof
+from typing import Union 
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
 from farmhash import FarmHash64WithSeed
@@ -49,7 +50,7 @@ class BloomFilter:
         self.bits = bitarray(buffer=self.shm_bits.buf)
         self.bits[:] = 0
 
-    def __contains__(self, item):
+    def __contains__(self, item: Union[str, bytes]):
         """
         Test if an item is present.
 
@@ -69,7 +70,7 @@ class BloomFilter:
         """
         del self.bits
 
-    def add(self, item):
+    def add(self, item: Union[str, bytes]):
         """
         Add an item.
 
