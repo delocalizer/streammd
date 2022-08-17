@@ -2,10 +2,14 @@
 Test markdups module.
 """
 from multiprocessing.managers import SharedMemoryManager
+from multiprocessing import Queue
+from importlib.resources import files
 from unittest import TestCase
 
 from streammd.bloomfilter import BloomFilter
 from streammd.markdups import *
+
+RESOURCES = files('tests.streammd.resources')
 
 
 class TestMarkDups(TestCase):
@@ -17,21 +21,42 @@ class TestMarkDups(TestCase):
         """
         Confirm that ValueError is raised if SAM file input lacks header.
         """
-        pass
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        with RESOURCES.joinpath('no_header.sam') as infile:
+            with self.assertRaises(ValueError, msg=MSG_NOHEADER):
+                samrecords(headerq, samq, 1, 50, infile)
 
     def test_samrecords_qnamegrouped(self):
         """
         Confirm that ValueError is raised if SAM file records are not
         grouped by qname.
         """
-        pass
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        with RESOURCES.joinpath('not_qnamegrouped.sam') as infile:
+            with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
+                samrecords(headerq, samq, 1, 50, infile)
 
-    def test_samrecords_operation(self):
+    def test_samrecords_read_and_enqueue(self):
         """
-        Confirm that SAM file header is written to outfd and headerq, and
-        SAM file records are written to samq.
+        Confirm that SAM file header is written headerq and SAM file records
+        are written to samq in batched groups as expected.
         """
-        pass
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        nconsumers = 1
+        with RESOURCES.joinpath('6_good_records.sam') as infile:
+            samrecords(headerq, samq, nconsumers, 50, infile)
+        # one header per consumer
+        self.assertEqual(headerq.qsize(), nconsumers)
+        # one batch (3 QNAME groups < batchsize) + one sentinel per consumer
+        self.assertEqual(samq.qsize(), 1 + nconsumers)
+        # 3 QNAME groups in the batch, each with one pair
+        batch = samq.get()
+        self.assertEqual(len(batch), 3)
+        for group in batch:
+            self.assertEqual(len(group), 2)
 
     def test_readends_1(self):
         """
