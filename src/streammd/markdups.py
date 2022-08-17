@@ -193,27 +193,43 @@ def parse_cmdargs(args):
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
-                        help=('expected maximum number of read pairs n '
+                        help=('Expected maximum number of read pairs n '
                               f'(default={DEFAULT_NITEMS}).'))
     parser.add_argument('-p', '--fp-rate',
                         type=float,
                         default=DEFAULT_FPRATE,
-                        help=('target maximum false positive rate when n '
+                        help=('Target maximum false positive rate when n '
                               f'items are stored (default={DEFAULT_FPRATE}).'))
     parser.add_argument('--consumer-processes',
                         type=int,
                         default=DEFAULT_NWORKERS,
                         help=('Number of hashing processes '
                               f'(default={DEFAULT_NWORKERS}).'))
+    parser.add_argument('--mem-calc',
+                        type=float,
+                        nargs=2,
+                        metavar=('N_ITEMS', 'FP_RATE'),
+                        help=('Print approximate memory requirement in GB '
+                        'for n items and target maximum false positive rate '
+                        'p.'))
     parser.add_argument('--queue-size',
                         type=int,
                         default=DEFAULT_SAMQSIZE,
-                        help=('size of the SAM record queue '
-                              f'(default={DEFAULT_SAMQSIZE})'))
+                        help=('Size of the SAM record queue '
+                              f'(default={DEFAULT_SAMQSIZE}).'))
     parser.add_argument('--version',
                         action='version',
                         version=metadata.version('streammd'))
     return parser.parse_args(args)
+
+
+def mem_calc(n, p):
+    """
+    Returns approximate memory requirement in GB for n items and target maximum
+    false positive rate p.
+    """
+    m, _ = BloomFilter.optimal_m_k(n, p)
+    return m / 8 / 1024 ** 3
 
 
 def main():
@@ -221,6 +237,9 @@ def main():
     Run as CLI script
     """
     args = parse_cmdargs(sys.argv[1:])
+    if args.mem_calc:
+        print('%0.3fGB' % mem_calc(*args.mem_calc))
+        sys.exit(0)
     LOGGER.info(MSG_VERSION, metadata.version('streammd'))
     LOGGER.info(' '.join(sys.argv))
     manager = Manager()
