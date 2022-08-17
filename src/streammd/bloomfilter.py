@@ -77,7 +77,7 @@ class BloomFilter:
         Args:
             item: item to add.
 
-        Returns True if item is already present, False otherwise.
+        Returns True if item was added, False if it was already present.
 
         Note:
         For the sake of speed, this implementation does not use locking and
@@ -96,12 +96,12 @@ class BloomFilter:
         behaviour of this implementation is acceptable. My testing showed that
         using multiprocessing.Lock slowed performance by about 20x.
         """
-        present = True
+        added = False
         for pos in self.hash(item):
             if self.bits[pos] == 0:
-                present = False
+                added = True
                 self.bits[pos] = 1
-        return present
+        return added
 
     @property
     def config(self):
