@@ -1,23 +1,33 @@
 # streammd
 
-## Description
+Single-pass probabilistic duplicate marking of alignments with a Bloom filter.
 
-Single-pass duplicate marking with a Bloom filter. This is a probabilistic
-approach to duplicate detection with the following features:
+Input is a SAM file format input stream: a valid header followed by reads in
+qname-grouped order (e.g. output of `bwa mem`). Detected duplicates have the
+SAM FLAG 0x400 bit set in the outputs and summary metrics are written to STDERR
+at the end of processing.
 
- * very fast (typically 2-3x faster than Picard MarkDuplicates)
- * low memory use (approx 5GB for 300M read pairs)
- * tunable target false positive rate
- * streaming input and output
+### Features
 
-Detected duplicates have the SAM FLAG 0x400 bit set in the outputs.
+* Very fast (when run with default settings `streammd` is typically 3-4x faster
+  than Picard MarkDuplicates).
+* Low memory use, especially for large libraries (approx 5GB for 1B read pairs).
+* Soft clipping is correctly handled when determining ends.
+* Tunable target false positive rate.
+* Streaming input and output.
 
-Summary metrics are output to STDERR at the end of processing.
+### Limitations
 
-## Implementation
+Inherent, due to the nature of the single-pass operation:
 
-Currently only paired reads in qname-grouped order are supported. Soft
-clipping is correctly handled when determining fragment ends.
+* `streammd` retains the first encountered template as the original and marks
+  subsequently encountered copies as duplicates. This differs from Picard
+  MarkDuplicates which marks those of lowest quality as the duplicates.
+
+Implementation specific:
+
+* Output is not deterministic when using more than 1 consumer process.
+* Only paired reads are supported.
 
 ## Install
 
@@ -73,19 +83,16 @@ maximum false positive rate `p`:
 |1.00E+09 |1.00E-08 |4.4634GB   |
 |1.00E+09 |1.00E-09 |5.0213GB   |
 
-For calculating `n`, multiply the number of read pairs in the input by 3
-because for each template 3 items are stored: 2 x read ends and 1 x template
-ends.
-
-For example; 60x human WGS 2x150bp paired-end sequencing ~> 6e8 templates ~> n = 1.8e9
+As a guide, 60x human WGS 2x150bp paired-end sequencing consists of
+n &#8776; 6.00E+08 templates.
 
 ### Handling outputs
 
-When using the default number of consumer processes `streammd` writes outputs
-to STDOUT extremely rapidly. In a pipeline this can mean anything downstream
-will become a bottleneck if it can't consume the inputs fast enough — for
-example, if you want to write the outputs to bam format using `samtools view`
-you should use 8 or more compression threads for optimal speed:
+When using the default settings `streammd` writes outputs to STDOUT extremely
+rapidly. In a pipeline this can mean anything downstream will become a
+bottleneck if it can't process its inputs fast enough — for example, if you
+want to write the outputs to bam format using `samtools view` you should use 8
+or more compression threads for optimal speed:
 
 ```bash
 samtools view -h some.bam|streammd|samtools view -h -@8 -o some.MD.bam

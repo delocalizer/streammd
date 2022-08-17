@@ -37,7 +37,7 @@ MSG_VERSION = 'streammd version %s'
 
 DEL = b'\x7f'.decode('ascii') # sorts last in ascii
 SENTINEL = 'STOP'
-UNMAPPED = (DEL, None, None)
+UNMAPPED = (DEL,)
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
@@ -117,15 +117,15 @@ def markdups(bfconfig, headerq, samq, outfd=1):
             alignments = [AlignedSegment.fromstring(r, header) for r in group]
             if not (ends := readends(alignments)):
                 continue
-            ends_str = ['_'.join(str(x) for x in end) for end in ends]
+            ends_str = [''.join(str(x) for x in end) for end in ends]
             if ends[1] == UNMAPPED and bf.add(ends_str[0]):
-                # replicate Picard MarkDuplicates behaviour: only the
-                # aligned read is marked as duplicate.
+                # Replicate Picard MarkDuplicates behaviour: only the aligned
+                # read is marked as duplicate.
                 for a in alignments:
                     if a.is_mapped:
                         a.flag += 1024
                         n_dup += 1
-            elif bf.add_pair(*ends_str):
+            elif bf.add(''.join(ends_str)):
                 for a in alignments:
                     a.flag += 1024
                     n_dup += 1
@@ -144,10 +144,18 @@ def readends(alignments):
 
     Args:
         alignments: qname group tuple of AlignedSegment instances.
+
+    Returns:
+        coordinate-sorted pair of ends:
+
+            [(left_contig, left_pos, left_orientation),
+                (right_contig, right_pos, right_orientation)]
+
+        an unmapped end will always appear last, with the value UNMAPPED.
     """
     r12 = [None, None]
 
-    # pick the primary alignments
+    # Pick the primary alignments.
     for alignment in alignments:
         if not (alignment.is_secondary or alignment.is_supplementary):
             if alignment.is_read1:
@@ -155,7 +163,7 @@ def readends(alignments):
             elif alignment.is_read2:
                 r12[1] = alignment
 
-    # bail if neither read aligns
+    # Bail if neither aligns.
     if all(r.is_unmapped for r in r12):
         return None
 
@@ -164,15 +172,15 @@ def readends(alignments):
         if r.is_unmapped:
             pass
         elif r.is_forward:
-            # leading soft clips
+            # Leading soft clips.
             front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
             ends[i] = r.reference_name, r.reference_start - front_s, 'F'
         elif r.is_reverse:
-            # trailing soft clips
+            # Trailing soft clips.
             back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
             ends[i] = r.reference_name, r.reference_end + back_s, 'R'
 
-    # canonical ordering: l < r and UNMAPPED is always last
+    # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
     return ends
 
@@ -185,27 +193,43 @@ def parse_cmdargs(args):
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
-                        help=('expected maximum number of read pairs n '
+                        help=('Expected maximum number of read pairs n '
                               f'(default={DEFAULT_NITEMS}).'))
     parser.add_argument('-p', '--fp-rate',
                         type=float,
                         default=DEFAULT_FPRATE,
-                        help=('target maximum false positive rate when n '
+                        help=('Target maximum false positive rate when n '
                               f'items are stored (default={DEFAULT_FPRATE}).'))
     parser.add_argument('--consumer-processes',
                         type=int,
                         default=DEFAULT_NWORKERS,
                         help=('Number of hashing processes '
                               f'(default={DEFAULT_NWORKERS}).'))
+    parser.add_argument('--mem-calc',
+                        type=float,
+                        nargs=2,
+                        metavar=('N_ITEMS', 'FP_RATE'),
+                        help=('Print approximate memory requirement in GB '
+                        'for n items and target maximum false positive rate '
+                        'p.'))
     parser.add_argument('--queue-size',
                         type=int,
                         default=DEFAULT_SAMQSIZE,
-                        help=('size of the SAM record queue '
-                              f'(default={DEFAULT_SAMQSIZE})'))
+                        help=('Size of the SAM record queue '
+                              f'(default={DEFAULT_SAMQSIZE}).'))
     parser.add_argument('--version',
                         action='version',
                         version=metadata.version('streammd'))
     return parser.parse_args(args)
+
+
+def mem_calc(n, p):
+    """
+    Returns approximate memory requirement in GB for n items and target maximum
+    false positive rate p.
+    """
+    m, _ = BloomFilter.optimal_m_k(n, p)
+    return m / 8 / 1024 ** 3
 
 
 def main():
@@ -213,6 +237,9 @@ def main():
     Run as CLI script
     """
     args = parse_cmdargs(sys.argv[1:])
+    if args.mem_calc:
+        print('%0.3fGB' % mem_calc(*args.mem_calc))
+        sys.exit(0)
     LOGGER.info(MSG_VERSION, metadata.version('streammd'))
     LOGGER.info(' '.join(sys.argv))
     manager = Manager()

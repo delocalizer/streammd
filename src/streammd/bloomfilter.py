@@ -5,6 +5,7 @@ import logging
 from math import ceil, log
 from multiprocessing.shared_memory import SharedMemory
 from sys import getsizeof
+from typing import Union 
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
 from farmhash import FarmHash64WithSeed
@@ -49,7 +50,7 @@ class BloomFilter:
         self.bits = bitarray(buffer=self.shm_bits.buf)
         self.bits[:] = 0
 
-    def __contains__(self, item):
+    def __contains__(self, item: Union[str, bytes]):
         """
         Test if an item is present.
 
@@ -69,7 +70,7 @@ class BloomFilter:
         """
         del self.bits
 
-    def add(self, item):
+    def add(self, item: Union[str, bytes]):
         """
         Add an item.
 
@@ -97,26 +98,6 @@ class BloomFilter:
         """
         present = True
         for pos in self.hash(item):
-            if self.bits[pos] == 0:
-                present = False
-                self.bits[pos] = 1
-        return present
-
-    def add_pair(self, item1, item2):
-        """
-        Add each item in the pair as well as the pair itself in an efficient
-        manner.
-
-        Returns True if the pair itself is already present, False otherwise.
-        """
-        h1 = self.hash(item1)
-        h2 = self.hash(item2)
-        for pos in h1 + h2:
-            self.bits[pos] = 1
-        # See https://stackoverflow.com/a/27952689/6705037
-        h12 = [(3*a + b) % self.m for a, b in zip(h1, h2)]
-        present = True
-        for pos in h12:
             if self.bits[pos] == 0:
                 present = False
                 self.bits[pos] = 1
