@@ -29,10 +29,12 @@ LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 LOGGER.addHandler(logging.StreamHandler())
 
 MSG_DUPFRAC = 'duplicate fraction: %0.4f'
+MSG_NOHEADER = 'no header lines detected'
 MSG_NALIGN = 'alignments seen: %s'
 MSG_NDUP = 'duplicates marked: %s'
 MSG_NQNAME = 'qnames seen: %s'
 MSG_NUNIQUE = 'approximate n of stored items (templates + read ends):  %s'
+MSG_QNAMEGRP = 'singleton %s: input does not appear to be qname grouped'
 MSG_VERSION = 'streammd version %s'
 
 DEL = b'\x7f'.decode('ascii') # sorts last in ascii
@@ -53,8 +55,8 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
         samq: multiprocessing.Queue to put SAM records.
         nconsumers: number of consumer processes.
         batchsize: number of lines per batch in samq (default=50).
-        infd: input stream file descriptor (default=0).
-        outfd: output stream file descriptor (default=1).
+        infd: input file descriptor (default=0).
+        outfd: stream file descriptor (default=1).
 
     Returns:
         None
@@ -64,27 +66,32 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     header = None
     headlines = []
     batch = []
-    for line in os.fdopen(infd):
-        if line.startswith('@'):
-            headlines.append(line)
-            os.write(outfd, line.encode('ascii'))
-        else:
-            if not header:
-                header = ''.join(headlines)
-                for _ in range(nconsumers):
-                    headerq.put(header)
-            record = line.strip()
-            qname = record.partition('\t')[0]
-            if qname == groupid:
-                group.append(record)
+    with open(infd) as infh:
+        for line in infh:
+            if line.startswith('@'):
+                headlines.append(line)
+                os.write(outfd, line.encode('ascii'))
             else:
-                if group:
-                    batch.append(group)
-                    if len(batch) == batchsize:
-                        samq.put(batch)
-                        batch = []
-                groupid = qname
-                group = [record]
+                if not header:
+                    if not headlines:
+                        raise ValueError(MSG_NOHEADER)
+                    header = ''.join(headlines)
+                    for _ in range(nconsumers):
+                        headerq.put(header)
+                record = line.strip()
+                qname = record.partition('\t')[0]
+                if qname == groupid:
+                    group.append(record)
+                else:
+                    if group:
+                        if not len(group) > 1:
+                            raise ValueError(MSG_QNAMEGRP % qname)
+                        batch.append(group)
+                        if len(batch) == batchsize:
+                            samq.put(batch)
+                            batch = []
+                    groupid = qname
+                    group = [record]
     batch.append(group)
     samq.put(batch)
     for _ in range(nconsumers):
