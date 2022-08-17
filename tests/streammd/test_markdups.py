@@ -6,8 +6,15 @@ from multiprocessing import Queue
 from importlib.resources import files
 from unittest import TestCase
 
+from pysam import AlignmentFile
+
 from streammd.bloomfilter import BloomFilter
-from streammd.markdups import *
+from streammd.markdups import (MSG_NOHEADER,
+                               MSG_QNAMEGRP,
+                               UNMAPPED,
+                               markdups,
+                               readends,
+                               samrecords)
 
 RESOURCES = files('tests.streammd.resources')
 
@@ -38,21 +45,21 @@ class TestMarkDups(TestCase):
             with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
                 samrecords(headerq, samq, 1, 50, infile)
 
-    def test_samrecords_read_and_enqueue(self):
+    def test_samrecords_batch_and_enqueue(self):
         """
         Confirm that SAM file header is written headerq and SAM file records
         are written to samq in batched groups as expected.
         """
         samq = Queue(1000)
         headerq = Queue(1000)
-        nconsumers = 1
+        nconsumers = 2
         with RESOURCES.joinpath('6_good_records.sam') as infile:
             samrecords(headerq, samq, nconsumers, 50, infile)
-        # one header per consumer
+        # One header per consumer.
         self.assertEqual(headerq.qsize(), nconsumers)
-        # one batch (3 QNAME groups < batchsize) + one sentinel per consumer
+        # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
         self.assertEqual(samq.qsize(), 1 + nconsumers)
-        # 3 QNAME groups in the batch, each with one pair
+        # 3 QNAME groups in the batch, each with one pair.
         batch = samq.get()
         self.assertEqual(len(batch), 3)
         for group in batch:
@@ -60,45 +67,94 @@ class TestMarkDups(TestCase):
 
     def test_readends_1(self):
         """
-        Confirm that ends of a duplicate pair in same orientation are the
-        same.
+        Confirm that calculated ends of a duplicate pair in same orientation
+        are the same.
         """
-        pass
+        sam = AlignmentFile(RESOURCES.joinpath('2_pairs_same_orientation.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_reverse)
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
     def test_readends_2(self):
         """
-        Confirm that ends of a duplicate pair in opposite orientation are the
-        same.
+        Confirm that calculated ends of a duplicate pair in opposite
+        orientation are the same.
         """
-        pass
+        sam = AlignmentFile(RESOURCES.joinpath(
+            '2_pairs_opposite_orientation.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_reverse)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_forward)
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
     def test_readends_3(self):
         """
         Confirm that soft clipping at fwd and reverse ends is handled
         as expected.
         """
-        pass
+        sam = AlignmentFile(RESOURCES.joinpath('2_pairs_soft_clipping.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_reverse)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_forward)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_reverse)
+        # Alignments all have different pos.
+        self.assertNotEqual(pair_1[0].pos, pair_2[0].pos)
+        self.assertNotEqual(pair_1[0].pos, pair_2[1].pos)
+        self.assertNotEqual(pair_1[1].pos, pair_2[0].pos)
+        self.assertNotEqual(pair_1[1].pos, pair_2[1].pos)
+        # But accounting for soft clipping the template ends are the same.
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
     def test_readends_4(self):
         """
         Confirm that one end unmapped is handled as expected.
         """
-        pass
+        sam = AlignmentFile(RESOURCES.joinpath('1_pair_one_unmapped_end.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_mapped)
+        ends_1 = readends(pair_1)
+        # Unmapped read end is sorted to last.
+        self.assertEqual(ends_1[-1], UNMAPPED)
 
     def test_readends_5(self):
         """
         Confirm that both ends unmapped is handled as expected.
         """
-        pass
+        sam = AlignmentFile(RESOURCES.joinpath('1_pair_two_unmapped_ends.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_unmapped)
+        ends_1 = readends(pair_1)
+        # If both reads are unmapped readends returns None.
+        self.assertIsNone(ends_1)
 
     def test_markdups_1(self):
         """
         Confirm that duplicates are marked as expected.
         """
-        pass
 
     def test_main(self):
         """
         Confirm that main() operates as expected.
         """
-        pass

@@ -153,14 +153,16 @@ def readends(alignments):
         alignments: qname group tuple of AlignedSegment instances.
 
     Returns:
-        coordinate-sorted pair of ends:
+        None if there are no aligned reads, otherwise a coordinate-sorted pair
+        of ends:
 
             [(left_contig, left_pos, left_orientation),
                 (right_contig, right_pos, right_orientation)]
 
-        an unmapped end will always appear last, with the value UNMAPPED.
+        a single unmapped end always appears last with the value UNMAPPED.
     """
     r12 = [None, None]
+    ends = [UNMAPPED, UNMAPPED]
 
     # Pick the primary alignments.
     for alignment in alignments:
@@ -174,7 +176,7 @@ def readends(alignments):
     if all(r.is_unmapped for r in r12):
         return None
 
-    ends = [UNMAPPED, UNMAPPED]
+    # Calculate the ends.
     for i, r in enumerate(r12):
         if r.is_unmapped:
             pass
