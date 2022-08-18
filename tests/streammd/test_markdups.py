@@ -4,12 +4,15 @@ Test markdups module.
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing import Queue
 from importlib.resources import files
+from tempfile import NamedTemporaryFile
 from unittest import TestCase
 
 from pysam import AlignmentFile
 
 from streammd.bloomfilter import BloomFilter
-from streammd.markdups import (MSG_NOHEADER,
+from streammd.markdups import (DEFAULT_FPRATE,
+                               DEFAULT_NITEMS,
+                               MSG_NOHEADER,
                                MSG_QNAMEGRP,
                                UNMAPPED,
                                markdups,
@@ -28,22 +31,28 @@ class TestMarkDups(TestCase):
         """
         Confirm that ValueError is raised if SAM file input lacks header.
         """
-        samq = Queue(1000)
-        headerq = Queue(1000)
-        with RESOURCES.joinpath('no_header.sam') as infile:
+        samq = Queue(100)
+        headerq = Queue(10)
+        nconsumers = 1
+        with (RESOURCES.joinpath('no_header.sam') as infile,
+                NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_NOHEADER):
-                samrecords(headerq, samq, 1, 50, infile)
+                samrecords(headerq, samq, nconsumers, infd=infile,
+                                                      outfd=out.fileno())
 
     def test_samrecords_qnamegrouped(self):
         """
         Confirm that ValueError is raised if SAM file records are not
         grouped by qname.
         """
-        samq = Queue(1000)
-        headerq = Queue(1000)
-        with RESOURCES.joinpath('not_qnamegrouped.sam') as infile:
+        samq = Queue(100)
+        headerq = Queue(10)
+        nconsumers = 1
+        with (RESOURCES.joinpath('not_qnamegrouped.sam') as infile,
+                NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
-                samrecords(headerq, samq, 1, 50, infile)
+                samrecords(headerq, samq, nconsumers, infd=infile,
+                                                      outfd=out.fileno())
 
     def test_samrecords_batch_and_enqueue(self):
         """
@@ -53,8 +62,10 @@ class TestMarkDups(TestCase):
         samq = Queue(1000)
         headerq = Queue(1000)
         nconsumers = 2
-        with RESOURCES.joinpath('6_good_records.sam') as infile:
-            samrecords(headerq, samq, nconsumers, 50, infile)
+        with (RESOURCES.joinpath('6_good_records.sam') as infile,
+                NamedTemporaryFile() as out):
+            samrecords(headerq, samq, nconsumers, infd=infile,
+                                                  outfd=out.fileno())
         # One header per consumer.
         self.assertEqual(headerq.qsize(), nconsumers)
         # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
@@ -153,6 +164,28 @@ class TestMarkDups(TestCase):
         """
         Confirm that duplicates are marked as expected.
         """
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        nconsumers = 1
+        expected = [
+            (alignment.qname, alignment.flag) for alignment in
+            AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
+        with (SharedMemoryManager() as smm,
+                RESOURCES.joinpath('test.qname.sam') as infile,
+                NamedTemporaryFile() as out):
+            samrecords(headerq, samq, nconsumers, infd=infile,
+                                                  outfd=out.fileno())
+            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            counts = markdups(bf.config, headerq, samq, outfd=out.fileno())
+            n_qname, n_align, n_dup = counts
+            self.assertEqual(n_qname, 2027)
+            self.assertEqual(n_align, 4058)
+            self.assertEqual(n_dup, 2037)
+            result = [
+                (alignment.qname, alignment.flag) for alignment in
+                AlignmentFile(out.name)]
+            self.assertEqual(result, expected)
+            
 
     def test_main(self):
         """
