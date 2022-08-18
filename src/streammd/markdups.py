@@ -13,27 +13,37 @@ from itertools import repeat
 from multiprocessing import Manager, Pool, Process
 from multiprocessing.managers import SharedMemoryManager
 import argparse
+import json
 import logging
 import os
 import sys
 from pysam import AlignmentHeader, AlignedSegment
 from .bloomfilter import BloomFilter
 
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+LOGGER.addHandler(logging.StreamHandler())
+
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = int(1e9)
 DEFAULT_NWORKERS = 8
 DEFAULT_SAMQSIZE = 1000
 
-LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
-LOGGER.addHandler(logging.StreamHandler())
+ALIGNMENTS = 'ALIGNMENTS'
+ALIGNMENTS_MARKED_DUPLICATE = 'ALIGNMENTS_MARKED_DUPLICATE'
+READ_PAIRS = 'READ_PAIRS'
+READ_PAIRS_MARKED_DUPLICATE = 'READ_PAIRS_MARKED_DUPLICATE'
+READ_PAIR_DUPLICATE_FRACTION = 'READ_PAIR_DUPLICATE_FRACTION'
+UNIQUE_ITEMS_APPROXIMATE = 'UNIQUE_ITEMS_APPROXIMATE'
 
-MSG_DUPFRAC = 'duplicate fraction: %0.4f'
+MSG_ALIGNMENTS = 'alignments seen: %s'
+MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
+MSG_READ_PAIRS = 'read pairs seen: %s'
+MSG_READ_PAIRS_MARKED_DUPLICATE = 'read pairs marked duplicate: %s'
+MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
+MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
+
 MSG_NOHEADER = 'no header lines detected'
-MSG_NALIGN = 'alignments seen: %s'
-MSG_NDUP = 'duplicates marked: %s'
-MSG_NQNAME = 'qnames seen: %s'
-MSG_NUNIQUE = 'approximate n of stored items (templates + read ends):  %s'
 MSG_QNAMEGRP = 'singleton %s: input does not appear to be qname grouped'
 MSG_VERSION = 'streammd version %s'
 
@@ -109,11 +119,17 @@ def markdups(bfconfig, headerq, samq, outfd=1):
         outfd: output stream file descriptor (default=1).
 
     Returns:
-        (n_qname, n_dupe): number of qnames and number of duplicates seen.
+
+        {
+            READ_PAIRS: n_qname,                    # read pairs (qnames) seen
+            READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,  # read pairs marked dup
+            ALIGNMENTS: n_align,                    # alignments seen
+            ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup  # alignments marked dup
+        }
     """
     bf = BloomFilter.copy(bfconfig)
     header = AlignmentHeader.from_text(headerq.get())
-    n_qname, n_align, n_dup = 0, 0, 0
+    n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = samq.get()
         if batch == SENTINEL:
@@ -126,24 +142,29 @@ def markdups(bfconfig, headerq, samq, outfd=1):
                 continue
             ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
             if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
-                # Replicate Picard MarkDuplicates behaviour: only the aligned
-                # read is marked as duplicate.
+                n_rp_dup += 1
                 for a in alignments:
+                    # Replicate Picard MarkDuplicates behaviour: only the
+                    # aligned read is marked as duplicate.
                     if a.is_mapped:
+                        n_aln_dup += 1
                         a.flag += 1024
-                        n_dup += 1
             elif not bf.add(''.join(ends_str)):
+                n_rp_dup += 1
                 for a in alignments:
+                    n_aln_dup += 1
                     a.flag += 1024
-                    n_dup += 1
-
             # Write the group as a group. In contrast to sys.stdout.write,
             # os.write is atomic so we don't have to care about locking or
             # using an output queue.
             out = '\n'.join(a.to_string() for a in alignments) + '\n'
             os.write(outfd, out.encode('ascii'))
-    return (n_qname, n_align, n_dup)
-
+    return {
+        READ_PAIRS: n_qname,
+        READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
+        ALIGNMENTS: n_align,
+        ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
+    }
 
 def readends(alignments):
     """
@@ -194,6 +215,45 @@ def readends(alignments):
     return ends
 
 
+def mem_calc(n, p):
+    """
+    Returns approximate memory requirement in GB for n items and target maximum
+    false positive rate p.
+    """
+    m, _ = BloomFilter.optimal_m_k(n, p)
+    return m / 8 / 1024 ** 3
+
+
+def output_metrics(metrics, asjson=False):
+    """
+    Output metrics.
+
+    Args:
+        metrics: dict of metrics.
+    """
+    if asjson:
+        LOGGER.info(
+            # kludge to output rounded floats
+            # https://stackoverflow.com/a/29066406/6705037
+            json.dumps(
+                json.loads(
+                    json.dumps(metrics),
+                    parse_float=lambda x: round(float(x), 4)),
+                indent=2,
+                sort_keys=True))
+    else:
+        LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
+                    metrics[UNIQUE_ITEMS_APPROXIMATE])
+        LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
+        LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
+                    metrics[ALIGNMENTS_MARKED_DUPLICATE])
+        LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
+        LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
+                    metrics[READ_PAIRS_MARKED_DUPLICATE])
+        LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
+                    metrics[READ_PAIR_DUPLICATE_FRACTION])
+
+
 def parse_cmdargs(args):
     """
     Returns: Parsed arguments
@@ -222,6 +282,9 @@ def parse_cmdargs(args):
                         default=DEFAULT_NWORKERS,
                         help=('Number of hashing processes '
                               f'(default={DEFAULT_NWORKERS}).'))
+    parser.add_argument('--json-metrics',
+                        action='store_true',
+                        help='Output metrics in JSON format')
     parser.add_argument('--mem-calc',
                         type=float,
                         nargs=2,
@@ -238,15 +301,6 @@ def parse_cmdargs(args):
                         action='version',
                         version=metadata.version('streammd'))
     return parser.parse_args(args)
-
-
-def mem_calc(n, p):
-    """
-    Returns approximate memory requirement in GB for n items and target maximum
-    false positive rate p.
-    """
-    m, _ = BloomFilter.optimal_m_k(n, p)
-    return m / 8 / 1024 ** 3
 
 
 def main():
@@ -273,15 +327,13 @@ def main():
         with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
             bf = BloomFilter(smm, args.n_items, args.fp_rate)
             mdargs = repeat((bf.config, headerq, samq, outfd), nconsumers)
-            counts = pool.starmap(markdups, mdargs)
-            n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
-            n_unique = bf.count()
+            counts = list(pool.starmap(markdups, mdargs))
             producer.join()
-    LOGGER.info(MSG_NUNIQUE, n_unique)
-    LOGGER.info(MSG_NQNAME, n_qname)
-    LOGGER.info(MSG_NALIGN, n_align)
-    LOGGER.info(MSG_NDUP, n_dup)
-    LOGGER.info(MSG_DUPFRAC, (n_dup/n_align))
+            metrics = {k: sum(d[k] for d in counts) for k in counts[0]}
+            metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
+            metrics[READ_PAIR_DUPLICATE_FRACTION] = (
+                    metrics[READ_PAIRS_MARKED_DUPLICATE]/metrics[READ_PAIRS])
+            output_metrics(metrics, asjson=args.json_metrics)
 
 
 if __name__ == '__main__':

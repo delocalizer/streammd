@@ -9,6 +9,7 @@ from unittest import TestCase
 from unittest.mock import patch
 import contextlib
 import io
+import json
 import sys
 
 from pysam import AlignmentFile
@@ -16,6 +17,10 @@ from pysam import AlignmentFile
 from streammd.bloomfilter import BloomFilter
 from streammd.markdups import (DEFAULT_FPRATE,
                                DEFAULT_NITEMS,
+                               ALIGNMENTS,
+                               ALIGNMENTS_MARKED_DUPLICATE,
+                               READ_PAIRS,
+                               READ_PAIRS_MARKED_DUPLICATE,
                                MSG_NOHEADER,
                                MSG_QNAMEGRP,
                                UNMAPPED,
@@ -181,16 +186,16 @@ class TestMarkDups(TestCase):
             samrecords(headerq, samq, nconsumers, infd=inf, outfd=out.fileno())
             bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
             counts = markdups(bf.config, headerq, samq, outfd=out.fileno())
-            n_qname, n_align, n_dup = counts
-            self.assertEqual(n_qname, 2027)
-            self.assertEqual(n_align, 4058)
-            self.assertEqual(n_dup, 2037)
+            self.assertEqual(counts[READ_PAIRS], 2027)
+            self.assertEqual(counts[READ_PAIRS_MARKED_DUPLICATE], 1018)
+            self.assertEqual(counts[ALIGNMENTS], 4058)
+            self.assertEqual(counts[ALIGNMENTS_MARKED_DUPLICATE], 2037)
             result = [
                 (alignment.qname, alignment.flag) for alignment in
                 AlignmentFile(out.name)]
             self.assertEqual(result, expected)
 
-    def test_main_markdups(self):
+    def test_main_markdups_1(self):
         """
         Confirm that main() markdups operates as expected.
         """
@@ -208,6 +213,30 @@ class TestMarkDups(TestCase):
                 (alignment.qname, alignment.flag) for alignment in
                 AlignmentFile(out.name)]
             self.assertEqual(result, expected)
+
+    def test_main_markdups_2(self):
+        """
+        Confirm that main() markdups --json-metrics operates as expected.
+        """
+        expected = {
+            'ALIGNMENTS': 4058,
+            'ALIGNMENTS_MARKED_DUPLICATE': 2037,
+            'READ_PAIRS': 2027,
+            'READ_PAIRS_MARKED_DUPLICATE': 1018,
+            'READ_PAIR_DUPLICATE_FRACTION': 0.5022,
+            'UNIQUE_ITEMS_APPROXIMATE': 1011
+        }
+        with (RESOURCES.joinpath('test.qname.sam') as inf,
+                NamedTemporaryFile() as out):
+            testargs = list(
+                map(str, ('streammd', '--consumer-processes', 1, '--input',
+                          inf, '--output', out.name, '--json-metrics')))
+            outstr = io.StringIO()
+            with (patch.object(sys, 'argv', testargs),
+                    self.assertLogs('streammd.markdups', level='INFO') as log):
+                main()
+                self.assertEqual(expected,
+                        json.loads(log.output[-1].split(':', 2)[-1]))
 
     def test_main_memcalc(self):
         """
