@@ -124,7 +124,7 @@ def markdups(bfconfig, headerq, samq, outfd=1):
             alignments = [AlignedSegment.fromstring(r, header) for r in group]
             if not (ends := readends(alignments)):
                 continue
-            ends_str = ['_'.join(str(x) for x in end) for end in ends]
+            ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
             if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
                 # Replicate Picard MarkDuplicates behaviour: only the aligned
                 # read is marked as duplicate.
@@ -156,8 +156,8 @@ def readends(alignments):
         None if there are no aligned reads, otherwise a coordinate-sorted pair
         of ends:
 
-            [(left_contig, left_pos, left_orientation),
-                (right_contig, right_pos, right_orientation)]
+            [(left_refid, left_pos, left_orientation),
+                (right_refid, right_pos, right_orientation)]
 
         a single unmapped end always appears last with the value UNMAPPED.
     """
@@ -183,11 +183,11 @@ def readends(alignments):
         elif r.is_forward:
             # Leading soft clips.
             front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-            ends[i] = r.reference_name, r.reference_start - front_s, 'F'
+            ends[i] = r.reference_id, r.reference_start - front_s, 'F'
         elif r.is_reverse:
             # Trailing soft clips.
             back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-            ends[i] = r.reference_name, r.reference_end + back_s, 'R'
+            ends[i] = r.reference_id, r.reference_end + back_s, 'R'
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
