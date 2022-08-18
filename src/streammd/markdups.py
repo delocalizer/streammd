@@ -124,7 +124,7 @@ def markdups(bfconfig, headerq, samq, outfd=1):
             alignments = [AlignedSegment.fromstring(r, header) for r in group]
             if not (ends := readends(alignments)):
                 continue
-            ends_str = [''.join(str(x) for x in end) for end in ends]
+            ends_str = ['_'.join(str(x) for x in end) for end in ends]
             if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
                 # Replicate Picard MarkDuplicates behaviour: only the aligned
                 # read is marked as duplicate.
