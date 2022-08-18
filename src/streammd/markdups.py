@@ -37,9 +37,9 @@ MSG_NUNIQUE = 'approximate n of stored items (templates + read ends):  %s'
 MSG_QNAMEGRP = 'singleton %s: input does not appear to be qname grouped'
 MSG_VERSION = 'streammd version %s'
 
-DEL = b'\x7f'.decode('ascii') # sorts last in ascii
 SENTINEL = 'STOP'
-UNMAPPED = (DEL,)
+# refID in SAM spec is int32 so first element is > any legal value.
+UNMAPPED = (2**31, -1, '')
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
@@ -199,6 +199,11 @@ def parse_cmdargs(args):
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('input',
+                        nargs='?',
+                        default=0,
+                        help=('Input SAM file. If not supplied, default is '
+                              'STDIN.'))
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -255,7 +260,9 @@ def main():
     headerq = manager.Queue(args.consumer_processes)
     samq = manager.Queue(args.queue_size)
     nconsumers = args.consumer_processes
-    producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
+    producer = Process(target=samrecords,
+                       args=(headerq, samq, nconsumers),
+                       kwargs={'infd':args.input})
     producer.start()
     with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
