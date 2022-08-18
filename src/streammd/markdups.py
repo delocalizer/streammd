@@ -199,11 +199,14 @@ def parse_cmdargs(args):
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('input',
-                        nargs='?',
+    parser.add_argument('--input',
                         default=0,
                         help=('Input SAM file. If not supplied, default is '
                               'STDIN.'))
+    parser.add_argument('--output',
+                        default=1,
+                        help=('Output SAM file. If not supplied, default is '
+                              'STDOUT.'))
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -260,17 +263,20 @@ def main():
     headerq = manager.Queue(args.consumer_processes)
     samq = manager.Queue(args.queue_size)
     nconsumers = args.consumer_processes
-    producer = Process(target=samrecords,
-                       args=(headerq, samq, nconsumers),
-                       kwargs={'infd':args.input})
-    producer.start()
-    with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
-        bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        mdargs = repeat((bf.config, headerq, samq), nconsumers)
-        counts = pool.starmap(markdups, mdargs)
-        n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
-        n_unique = bf.count()
-        producer.join()
+    with open(args.input) as infh, open(args.output, 'wt') as outfh:
+        infd, outfd = infh.fileno(), outfh.fileno()
+        producer = Process(target=samrecords,
+                        args=(headerq, samq, nconsumers),
+                        kwargs={'infd':infd,
+                                'outfd':outfd})
+        producer.start()
+        with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
+            bf = BloomFilter(smm, args.n_items, args.fp_rate)
+            mdargs = repeat((bf.config, headerq, samq, outfd), nconsumers)
+            counts = pool.starmap(markdups, mdargs)
+            n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
+            n_unique = bf.count()
+            producer.join()
     LOGGER.info(MSG_NUNIQUE, n_unique)
     LOGGER.info(MSG_NQNAME, n_qname)
     LOGGER.info(MSG_NALIGN, n_align)

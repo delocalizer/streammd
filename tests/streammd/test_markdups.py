@@ -34,10 +34,10 @@ class TestMarkDups(TestCase):
         samq = Queue(100)
         headerq = Queue(10)
         nconsumers = 1
-        with (RESOURCES.joinpath('no_header.sam') as infile,
+        with (RESOURCES.joinpath('no_header.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_NOHEADER):
-                samrecords(headerq, samq, nconsumers, infd=infile,
+                samrecords(headerq, samq, nconsumers, infd=inf,
                                                       outfd=out.fileno())
 
     def test_samrecords_qnamegrouped(self):
@@ -48,10 +48,10 @@ class TestMarkDups(TestCase):
         samq = Queue(100)
         headerq = Queue(10)
         nconsumers = 1
-        with (RESOURCES.joinpath('not_qnamegrouped.sam') as infile,
+        with (RESOURCES.joinpath('not_qnamegrouped.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
-                samrecords(headerq, samq, nconsumers, infd=infile,
+                samrecords(headerq, samq, nconsumers, infd=inf,
                                                       outfd=out.fileno())
 
     def test_samrecords_batch_and_enqueue(self):
@@ -62,9 +62,9 @@ class TestMarkDups(TestCase):
         samq = Queue(1000)
         headerq = Queue(1000)
         nconsumers = 2
-        with (RESOURCES.joinpath('6_good_records.sam') as infile,
+        with (RESOURCES.joinpath('6_good_records.sam') as inf,
                 NamedTemporaryFile() as out):
-            samrecords(headerq, samq, nconsumers, infd=infile,
+            samrecords(headerq, samq, nconsumers, infd=inf,
                                                   outfd=out.fileno())
         # One header per consumer.
         self.assertEqual(headerq.qsize(), nconsumers)
@@ -171,10 +171,9 @@ class TestMarkDups(TestCase):
             (alignment.qname, alignment.flag) for alignment in
             AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
         with (SharedMemoryManager() as smm,
-                RESOURCES.joinpath('test.qname.sam') as infile,
+                RESOURCES.joinpath('test.qname.sam') as inf,
                 NamedTemporaryFile() as out):
-            samrecords(headerq, samq, nconsumers, infd=infile,
-                                                  outfd=out.fileno())
+            samrecords(headerq, samq, nconsumers, infd=inf, outfd=out.fileno())
             bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
             counts = markdups(bf.config, headerq, samq, outfd=out.fileno())
             n_qname, n_align, n_dup = counts
