@@ -12,7 +12,8 @@ at the end of processing.
 * Very fast (when run with default settings `streammd` is typically 3-4x faster
   than Picard MarkDuplicates).
 * Low memory use, especially for large libraries (approx 5GB for 1B read pairs).
-* Soft clipping is correctly handled when determining ends.
+* High concordance with Picard MarkDuplicates metrics.
+* Soft-clipped reads correctly handled.
 * Tunable target false positive rate.
 * Streaming input and output.
 
@@ -23,11 +24,13 @@ Inherent, due to the nature of the single-pass operation:
 * `streammd` retains the first encountered template as the original and marks
   subsequently encountered copies as duplicates. This differs from Picard
   MarkDuplicates which marks those of lowest quality as the duplicates.
+* `streammd` does not differentiate between optical duplicates and PCR
+  duplicates.
 
 Implementation specific:
 
 * Output is not deterministic when using more than 1 consumer process.
-* Only paired reads are supported.
+* Currently only paired reads are supported.
 
 ## Install
 
