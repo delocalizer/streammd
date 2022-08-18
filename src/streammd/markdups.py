@@ -29,15 +29,17 @@ LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 LOGGER.addHandler(logging.StreamHandler())
 
 MSG_DUPFRAC = 'duplicate fraction: %0.4f'
+MSG_NOHEADER = 'no header lines detected'
 MSG_NALIGN = 'alignments seen: %s'
 MSG_NDUP = 'duplicates marked: %s'
 MSG_NQNAME = 'qnames seen: %s'
 MSG_NUNIQUE = 'approximate n of stored items (templates + read ends):  %s'
+MSG_QNAMEGRP = 'singleton %s: input does not appear to be qname grouped'
 MSG_VERSION = 'streammd version %s'
 
-DEL = b'\x7f'.decode('ascii') # sorts last in ascii
 SENTINEL = 'STOP'
-UNMAPPED = (DEL,)
+# refID in SAM spec is int32 so first element is > any legal value.
+UNMAPPED = (2**31, -1, '')
 
 
 def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
@@ -53,8 +55,8 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
         samq: multiprocessing.Queue to put SAM records.
         nconsumers: number of consumer processes.
         batchsize: number of lines per batch in samq (default=50).
-        infd: input stream file descriptor (default=0).
-        outfd: output stream file descriptor (default=1).
+        infd: input file descriptor (default=0).
+        outfd: stream file descriptor (default=1).
 
     Returns:
         None
@@ -64,27 +66,32 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
     header = None
     headlines = []
     batch = []
-    for line in os.fdopen(infd):
-        if line.startswith('@'):
-            headlines.append(line)
-            os.write(outfd, line.encode('ascii'))
-        else:
-            if not header:
-                header = ''.join(headlines)
-                for _ in range(nconsumers):
-                    headerq.put(header)
-            record = line.strip()
-            qname = record.partition('\t')[0]
-            if qname == groupid:
-                group.append(record)
+    with open(infd) as infh:
+        for line in infh:
+            if line.startswith('@'):
+                headlines.append(line)
+                os.write(outfd, line.encode('ascii'))
             else:
-                if group:
-                    batch.append(group)
-                    if len(batch) == batchsize:
-                        samq.put(batch)
-                        batch = []
-                groupid = qname
-                group = [record]
+                if not header:
+                    if not headlines:
+                        raise ValueError(MSG_NOHEADER)
+                    header = ''.join(headlines)
+                    for _ in range(nconsumers):
+                        headerq.put(header)
+                record = line.strip()
+                qname = record.partition('\t')[0]
+                if qname == groupid:
+                    group.append(record)
+                else:
+                    if group:
+                        if not len(group) > 1:
+                            raise ValueError(MSG_QNAMEGRP % qname)
+                        batch.append(group)
+                        if len(batch) == batchsize:
+                            samq.put(batch)
+                            batch = []
+                    groupid = qname
+                    group = [record]
     batch.append(group)
     samq.put(batch)
     for _ in range(nconsumers):
@@ -117,15 +124,15 @@ def markdups(bfconfig, headerq, samq, outfd=1):
             alignments = [AlignedSegment.fromstring(r, header) for r in group]
             if not (ends := readends(alignments)):
                 continue
-            ends_str = [''.join(str(x) for x in end) for end in ends]
-            if ends[1] == UNMAPPED and bf.add(ends_str[0]):
+            ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
+            if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
                 # Replicate Picard MarkDuplicates behaviour: only the aligned
                 # read is marked as duplicate.
                 for a in alignments:
                     if a.is_mapped:
                         a.flag += 1024
                         n_dup += 1
-            elif bf.add(''.join(ends_str)):
+            elif not bf.add(''.join(ends_str)):
                 for a in alignments:
                     a.flag += 1024
                     n_dup += 1
@@ -146,14 +153,16 @@ def readends(alignments):
         alignments: qname group tuple of AlignedSegment instances.
 
     Returns:
-        coordinate-sorted pair of ends:
+        None if there are no aligned reads, otherwise a coordinate-sorted pair
+        of ends:
 
-            [(left_contig, left_pos, left_orientation),
-                (right_contig, right_pos, right_orientation)]
+            [(left_refid, left_pos, left_orientation),
+                (right_refid, right_pos, right_orientation)]
 
-        an unmapped end will always appear last, with the value UNMAPPED.
+        a single unmapped end always appears last with the value UNMAPPED.
     """
     r12 = [None, None]
+    ends = [UNMAPPED, UNMAPPED]
 
     # Pick the primary alignments.
     for alignment in alignments:
@@ -167,18 +176,18 @@ def readends(alignments):
     if all(r.is_unmapped for r in r12):
         return None
 
-    ends = [UNMAPPED, UNMAPPED]
+    # Calculate the ends.
     for i, r in enumerate(r12):
         if r.is_unmapped:
             pass
         elif r.is_forward:
             # Leading soft clips.
             front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-            ends[i] = r.reference_name, r.reference_start - front_s, 'F'
+            ends[i] = r.reference_id, r.reference_start - front_s, 'F'
         elif r.is_reverse:
             # Trailing soft clips.
             back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-            ends[i] = r.reference_name, r.reference_end + back_s, 'R'
+            ends[i] = r.reference_id, r.reference_end + back_s, 'R'
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
@@ -190,6 +199,14 @@ def parse_cmdargs(args):
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--input',
+                        default=0,
+                        help=('Input SAM file. If not supplied, default is '
+                              'STDIN.'))
+    parser.add_argument('--output',
+                        default=1,
+                        help=('Output SAM file. If not supplied, default is '
+                              'STDOUT.'))
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -246,15 +263,20 @@ def main():
     headerq = manager.Queue(args.consumer_processes)
     samq = manager.Queue(args.queue_size)
     nconsumers = args.consumer_processes
-    producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
-    producer.start()
-    with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
-        bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        mdargs = repeat((bf.config, headerq, samq), nconsumers)
-        counts = pool.starmap(markdups, mdargs)
-        n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
-        n_unique = bf.count()
-        producer.join()
+    with open(args.input) as infh, open(args.output, 'wt') as outfh:
+        infd, outfd = infh.fileno(), outfh.fileno()
+        producer = Process(target=samrecords,
+                        args=(headerq, samq, nconsumers),
+                        kwargs={'infd':infd,
+                                'outfd':outfd})
+        producer.start()
+        with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
+            bf = BloomFilter(smm, args.n_items, args.fp_rate)
+            mdargs = repeat((bf.config, headerq, samq, outfd), nconsumers)
+            counts = pool.starmap(markdups, mdargs)
+            n_qname, n_align, n_dup = [sum(col) for col in zip(*counts)]
+            n_unique = bf.count()
+            producer.join()
     LOGGER.info(MSG_NUNIQUE, n_unique)
     LOGGER.info(MSG_NQNAME, n_qname)
     LOGGER.info(MSG_NALIGN, n_align)

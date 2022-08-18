@@ -174,10 +174,6 @@ All the following used 10 worker threads and `n=1e9, p=1e-6`.
 | [picard]        | [picard]         | 239        | 01:17:34 |[picard]|
 | 8 threads       | 1 threads to bam | 288        | 01:43:58 |  4     |
 
-
-
-
-
 Conclusions:
  * With 10 worker threads, speed is limited only by how fast we can process the
    outputs. Fastest results are writing directly to SAM or using many threads

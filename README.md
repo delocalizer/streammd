@@ -38,9 +38,10 @@ pip install -r requirements.txt --user .
 ```
 
 ## Test
+
 (optional, requires tox)
 ```bash
-TODO
+tox
 ```
 
 ## Usage

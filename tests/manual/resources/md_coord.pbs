@@ -1,0 +1,10 @@
+#PBS -l walltime=12:00:00
+#PBS -l ncpus=6
+#PBS -l mem=32G
+#PBS -N picardmd
+
+module load picard
+
+cd ~/WorkingData
+
+java -jar $PICARD_HOME/picard.jar MarkDuplicates VALIDATION_STRINGENCY=SILENT INPUT=140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.coord.bam OUTPUT=140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.coord.MD.bam METRICS_FILE=140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.coord.MD.bam.metrics ASSUME_SORT_ORDER=coordinate TAG_DUPLICATE_SET_MEMBERS=true 2>md.log

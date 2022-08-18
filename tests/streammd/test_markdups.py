@@ -1,158 +1,224 @@
+"""""
+Test markdups module.
 """
-Mark duplicates on SAM file input stream.
-"""
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import Queue, Process
 from multiprocessing.managers import SharedMemoryManager
-import logging
-import os
-from bloomfilter import BloomFilter
-from pysam import AlignmentHeader, AlignedSegment
+from multiprocessing import Queue
+from importlib.resources import files
+from tempfile import NamedTemporaryFile
+from unittest import TestCase
+from unittest.mock import patch
+import contextlib
+import io
+import sys
 
-DEFAULT_FPRATE = 1e-6
-DEFAULT_NITEMS = 1e9
-DEFAULT_NWORKERS = 10
-LOGGER = logging.getLogger(__name__)
-SENTINEL = 'STOP'
+from pysam import AlignmentFile
+
+from streammd.bloomfilter import BloomFilter
+from streammd.markdups import (DEFAULT_FPRATE,
+                               DEFAULT_NITEMS,
+                               MSG_NOHEADER,
+                               MSG_QNAMEGRP,
+                               UNMAPPED,
+                               main,
+                               markdups,
+                               readends,
+                               samrecords)
+
+RESOURCES = files('tests.streammd.resources')
 
 
-def markdups(bfconfig, headerq, samq, outfd=1):
+class TestMarkDups(TestCase):
     """
-    Process SAM file records.
-
-    Args:
-        bfconfig: Bloom filter configuration dict.
-        headerq: multiprocessing.Queue to get header.
-        samq: multiprocessing.Queue to get batches of paired SAM records.
-        outfd: output stream file descriptor (default=1).
-
-    Returns:
-        None
+    Test markdups module functions.
     """
-    bf = BloomFilter.copy(bfconfig)
-    header = AlignmentHeader.from_text(headerq.get())
-    while True:
+
+    def test_samrecords_header(self):
+        """
+        Confirm that ValueError is raised if SAM file input lacks header.
+        """
+        samq = Queue(100)
+        headerq = Queue(10)
+        nconsumers = 1
+        with (RESOURCES.joinpath('no_header.sam') as inf,
+                NamedTemporaryFile() as out):
+            with self.assertRaises(ValueError, msg=MSG_NOHEADER):
+                samrecords(headerq, samq, nconsumers, infd=inf,
+                                                      outfd=out.fileno())
+
+    def test_samrecords_qnamegrouped(self):
+        """
+        Confirm that ValueError is raised if SAM file records are not
+        grouped by qname.
+        """
+        samq = Queue(100)
+        headerq = Queue(10)
+        nconsumers = 1
+        with (RESOURCES.joinpath('not_qnamegrouped.sam') as inf,
+                NamedTemporaryFile() as out):
+            with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
+                samrecords(headerq, samq, nconsumers, infd=inf,
+                                                      outfd=out.fileno())
+
+    def test_samrecords_batch_and_enqueue(self):
+        """
+        Confirm that SAM file header is written headerq and SAM file records
+        are written to samq in batched groups as expected.
+        """
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        nconsumers = 2
+        with (RESOURCES.joinpath('6_good_records.sam') as inf,
+                NamedTemporaryFile() as out):
+            samrecords(headerq, samq, nconsumers, infd=inf,
+                                                  outfd=out.fileno())
+        # One header per consumer.
+        self.assertEqual(headerq.qsize(), nconsumers)
+        # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
+        self.assertEqual(samq.qsize(), 1 + nconsumers)
+        # 3 QNAME groups in the batch, each with one pair.
         batch = samq.get()
-        if batch == SENTINEL:
-            break
+        self.assertEqual(len(batch), 3)
         for group in batch:
-            alignments = [AlignedSegment.fromstring(r, header) for r in group]
-            ends = readends(alignments)
-            if ends and bf.add(ends):
-                for a in alignments:
-                    a.flag += 1024
-            # Write the group as a group. In contrast to sys.stdout.write,
-            # os.write is atomic so we don't have to care about locking or
-            # using an output queue.
-            out = '\n'.join(a.to_string() for a in alignments) + '\n'
-            os.write(outfd, out.encode('utf-8'))
+            self.assertEqual(len(group), 2)
 
+    def test_readends_1(self):
+        """
+        Confirm that calculated ends of a duplicate pair in same orientation
+        are the same.
+        """
+        sam = AlignmentFile(RESOURCES.joinpath('2_pairs_same_orientation.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_reverse)
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
-def readends(alignments):
-    """
-    Calculate ends of the fragment, accounting for soft-clipped bases.
+    def test_readends_2(self):
+        """
+        Confirm that calculated ends of a duplicate pair in opposite
+        orientation are the same.
+        """
+        sam = AlignmentFile(RESOURCES.joinpath(
+            '2_pairs_opposite_orientation.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_reverse)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_forward)
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
-    Args:
-        alignments: qname group tuple of AlignedSegment instances.
-    """
-    r1, r2 = None, None
-    # pick the primary alignments
-    for alignment in alignments:
-        if not (alignment.is_secondary or alignment.is_supplementary):
-            if alignment.is_read1:
-                r1 = alignment
-            elif alignment.is_read2:
-                r2 = alignment
-    # TODO: allow single ends to be mapped
-    if r1.is_unmapped or r2.is_unmapped:
-        return None
-    ends = [None, None]
-    for i, r in enumerate((r1, r2)):
-        if r.is_forward:
-            leading_S = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-                                                          # leading soft clips
-            ends[i] = r.reference_name, r.reference_start - leading_S
-        else:
-            trailing_S = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-                                                        # trailing soft clips
-            ends[i] = r.reference_name, r.reference_end + trailing_S
-    orientation = '^' if r1.is_reverse ^ r2.is_reverse else '='
-    # define canonical ordering: l < r
-    ends.sort()
-    (l_rname, l_pos), (r_rname, r_pos) = ends
-    return f'{orientation}{l_rname}{l_pos}{r_rname}{r_pos}'
+    def test_readends_3(self):
+        """
+        Confirm that soft clipping at fwd and reverse ends is handled
+        as expected.
+        """
+        sam = AlignmentFile(RESOURCES.joinpath('2_pairs_soft_clipping.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        pair_2 = (records[2], records[3])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_reverse)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_forward)
+        self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
+        self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_reverse)
+        # Alignments all have different pos.
+        self.assertNotEqual(pair_1[0].pos, pair_2[0].pos)
+        self.assertNotEqual(pair_1[0].pos, pair_2[1].pos)
+        self.assertNotEqual(pair_1[1].pos, pair_2[0].pos)
+        self.assertNotEqual(pair_1[1].pos, pair_2[1].pos)
+        # But accounting for soft clipping the template ends are the same.
+        ends_1 = readends(pair_1)
+        ends_2 = readends(pair_2)
+        self.assertEqual(ends_1, ends_2)
 
+    def test_readends_4(self):
+        """
+        Confirm that one end unmapped is handled as expected.
+        """
+        sam = AlignmentFile(RESOURCES.joinpath('1_pair_one_unmapped_end.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_mapped)
+        ends_1 = readends(pair_1)
+        # Unmapped read end is sorted to last.
+        self.assertEqual(ends_1[-1], UNMAPPED)
 
-def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
-    """
-    Read records from a qname-grouped SAM file input stream and enqueue them
-    in batches.
+    def test_readends_5(self):
+        """
+        Confirm that both ends unmapped is handled as expected.
+        """
+        sam = AlignmentFile(RESOURCES.joinpath('1_pair_two_unmapped_ends.sam'))
+        records = list(iter(sam))
+        pair_1 = (records[0], records[1])
+        self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
+        self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_unmapped)
+        ends_1 = readends(pair_1)
+        # If both reads are unmapped readends returns None.
+        self.assertIsNone(ends_1)
 
-    Header lines are written directly to the output stream and also to the
-    header queue.
+    def test_markdups(self):
+        """
+        Confirm that duplicates are marked as expected.
+        """
+        samq = Queue(1000)
+        headerq = Queue(1000)
+        nconsumers = 1
+        expected = [
+            (alignment.qname, alignment.flag) for alignment in
+            AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
+        with (SharedMemoryManager() as smm,
+                RESOURCES.joinpath('test.qname.sam') as inf,
+                NamedTemporaryFile() as out):
+            samrecords(headerq, samq, nconsumers, infd=inf, outfd=out.fileno())
+            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            counts = markdups(bf.config, headerq, samq, outfd=out.fileno())
+            n_qname, n_align, n_dup = counts
+            self.assertEqual(n_qname, 2027)
+            self.assertEqual(n_align, 4058)
+            self.assertEqual(n_dup, 2037)
+            result = [
+                (alignment.qname, alignment.flag) for alignment in
+                AlignmentFile(out.name)]
+            self.assertEqual(result, expected)
 
-    Args:
-        headerq: multiprocessing.Queue to put header.
-        samq: multiprocessing.Queue to put SAM records.
-        nconsumers: number of consumer processes.
-        batchsize: number of lines per batch in samq (default=50).
-        infd: input stream file descriptor (default=0).
-        outfd: output stream file descriptor (default=1).
+    def test_main_markdups(self):
+        """
+        Confirm that main() markdups operates as expected.
+        """
+        expected = [
+            (alignment.qname, alignment.flag) for alignment in
+            AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
+        with (RESOURCES.joinpath('test.qname.sam') as inf,
+                NamedTemporaryFile() as out):
+            testargs = list(
+                map(str, ('streammd', '--consumer-processes', 1, '--input',
+                          inf, '--output', out.name)))
+            with patch.object(sys, 'argv', testargs):
+                main()
+            result = [
+                (alignment.qname, alignment.flag) for alignment in
+                AlignmentFile(out.name)]
+            self.assertEqual(result, expected)
 
-    Returns:
-        None
-    """
-    group = []
-    groupid = None
-    header = None
-    headlines = []
-    batch = []
-    for line in os.fdopen(infd):
-        if line.startswith('@'):
-            headlines.append(line)
-            os.write(outfd, line.encode('ascii'))
-        else:
-            if not header:
-                header = ''.join(headlines)
-                for _ in range(nconsumers):
-                    headerq.put(header)
-            record = line.strip()
-            qname = record.partition('\t')[0]
-            if qname == groupid:
-                group.append(record)
-            else:
-                if group:
-                    batch.append(group)
-                    if len(batch) == batchsize:
-                        samq.put(batch)
-                        batch = []
-                groupid = qname
-                group = [record]
-    batch.append(group)
-    samq.put(batch)
-    for _ in range(nconsumers):
-        samq.put(SENTINEL)
-
-
-def main():
-
-    nconsumers = DEFAULT_NWORKERS
-    headerq = Queue(nconsumers)
-    samq = Queue(1000)
-    producer = Process(target=samrecords, args=(headerq, samq, nconsumers))
-    producer.start()
-    with SharedMemoryManager() as smm:
-        nitems = DEFAULT_NITEMS
-        fprate = DEFAULT_FPRATE
-        bf = BloomFilter(smm, nitems, fprate)
-        consumers = [
-            Process(target=markdups, args=(bf.config, headerq, samq))
-            for _ in range(nconsumers)
-        ]
-        list(map(lambda x: x.start(), consumers))
-        list(map(lambda x: x.join(), consumers))
-        producer.join()
-
-
-if __name__ == '__main__':
-    main()
+    def test_main_memcalc(self):
+        """
+        Confirm that main() --mem-calc operates as expected.
+        """
+        expected = '0.003GB\n'
+        testargs = list(
+            map(str, ('streammd', '--mem-calc', '1000000', '0.000001')))
+        with patch.object(sys, 'argv', testargs):
+            outstr = io.StringIO()
+            with contextlib.redirect_stdout(outstr):
+                with self.assertRaises(SystemExit):
+                    main()
+                self.assertEqual(outstr.getvalue(), expected)
