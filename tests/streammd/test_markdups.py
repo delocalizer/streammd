@@ -6,6 +6,10 @@ from multiprocessing import Queue
 from importlib.resources import files
 from tempfile import NamedTemporaryFile
 from unittest import TestCase
+from unittest.mock import patch
+import contextlib
+import io
+import sys
 
 from pysam import AlignmentFile
 
@@ -15,6 +19,7 @@ from streammd.markdups import (DEFAULT_FPRATE,
                                MSG_NOHEADER,
                                MSG_QNAMEGRP,
                                UNMAPPED,
+                               main,
                                markdups,
                                readends,
                                samrecords)
@@ -160,7 +165,7 @@ class TestMarkDups(TestCase):
         # If both reads are unmapped readends returns None.
         self.assertIsNone(ends_1)
 
-    def test_markdups_1(self):
+    def test_markdups(self):
         """
         Confirm that duplicates are marked as expected.
         """
@@ -184,9 +189,36 @@ class TestMarkDups(TestCase):
                 (alignment.qname, alignment.flag) for alignment in
                 AlignmentFile(out.name)]
             self.assertEqual(result, expected)
-            
 
-    def test_main(self):
+    def test_main_markdups(self):
         """
-        Confirm that main() operates as expected.
+        Confirm that main() markdups operates as expected.
         """
+        expected = [
+            (alignment.qname, alignment.flag) for alignment in
+            AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
+        with (RESOURCES.joinpath('test.qname.sam') as inf,
+                NamedTemporaryFile() as out):
+            testargs = list(
+                map(str, ('streammd', '--consumer-processes', 1, '--input',
+                          inf, '--output', out.name)))
+            with patch.object(sys, 'argv', testargs):
+                main()
+            result = [
+                (alignment.qname, alignment.flag) for alignment in
+                AlignmentFile(out.name)]
+            self.assertEqual(result, expected)
+
+    def test_main_memcalc(self):
+        """
+        Confirm that main() --mem-calc operates as expected.
+        """
+        expected = '0.003GB\n'
+        testargs = list(
+            map(str, ('streammd', '--mem-calc', '1000000', '0.000001')))
+        with patch.object(sys, 'argv', testargs):
+            outstr = io.StringIO()
+            with contextlib.redirect_stdout(outstr):
+                with self.assertRaises(SystemExit):
+                    main()
+                self.assertEqual(outstr.getvalue(), expected)
