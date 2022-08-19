@@ -1,0 +1,51 @@
+---
+title: "streammd vs Picard MarkDuplicates"
+author: "Conrad Leonard"
+date: "10/02/2022"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(ggpmisc)
+streammd <- read_delim(
+  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.qname.streammd.bam.flags.sort_by_freq',
+  col_names=c('streammd', 'flag'),
+  delim='\t',
+  show_col_types=FALSE)
+picard <- read_delim(
+  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.coord.MD.bam.flags.sort_by_streammd_freq',
+  col_names=c('picardmd', 'flag'),
+  delim='\t',
+  show_col_types=FALSE)
+annotations <-read_delim(
+  'flag_annotations',
+  col_names=c('flag', 'annotation'),
+  delim='\t',
+  show_col_types=FALSE)
+annotations$flag <- factor(annotations$flag)
+
+allflags <- merge(streammd, picard, by='flag')
+allflags <- merge(allflags, annotations, by='flag')
+allflags <- allflags %>% pivot_longer(c(`streammd`, `picardmd`), names_to='tool', values_to='count')
+
+dups <- allflags %>% filter(flag >= 1024 & flag <= 2048)
+
+dups$flag <- factor(dups$flag)
+allflags$flag <- factor(allflags$flag)
+
+dupsplot <- ggplot(dups, aes(fill=tool, y=count, x=flag)) + 
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle=90))
+
+allflagsplot <- ggplot(allflags, aes(fill=tool, y=count, x=flag)) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle=90)) 
+
+
+#dupsplot
+#allflagsplot
+```
+

@@ -1,0 +1,76 @@
+99	paired, proper pair, mate reverse strand, is read 1
+147	paired, proper pair, read reverse strand, is read 2
+83	paired, proper pair, read reverse strand, is read 1
+163	paired, proper pair, mate reverse strand, is read 2
+1171	paired, proper pair, read reverse strand, is read 2, duplicate
+1123	paired, proper pair, mate reverse strand, is read 1, duplicate
+1187	paired, proper pair, mate reverse strand, is read 2, duplicate
+1107	paired, proper pair, read reverse strand, is read 1, duplicate
+81	paired, read reverse strand, is read 1
+161	paired, mate reverse strand, is read 2
+97	paired, mate reverse strand, is read 1
+145	paired, read reverse strand, is read 2
+177	paired, read reverse strand, mate reverse strand, is read 2
+113	paired, read reverse strand, mate reverse strand, is read 1
+65	paired, is read 1
+129	paired, is read 2
+181	paired, read unmapped, read reverse strand, mate reverse strand, is read 2
+133	paired, read unmapped, is read 2
+73	paired, mate unmapped, is read 1
+121	paired, mate unmapped, read reverse strand, mate reverse strand, is read 1
+1169	paired, read reverse strand, is read 2, duplicate
+1121	paired, mate reverse strand, is read 1, duplicate
+1185	paired, mate reverse strand, is read 2, duplicate
+1105	paired, read reverse strand, is read 1, duplicate
+2209	paired, mate reverse strand, is read 2, supplementary alignment
+2193	paired, read reverse strand, is read 2, supplementary alignment
+2145	paired, mate reverse strand, is read 1, supplementary alignment
+2129	paired, read reverse strand, is read 1, supplementary alignment
+2225	paired, read reverse strand, mate reverse strand, is read 2, supplementary alignment
+2177	paired, is read 2, supplementary alignment
+2161	paired, read reverse strand, mate reverse strand, is read 1, supplementary alignment
+2113	paired, is read 1, supplementary alignment
+1153	paired, is read 2, duplicate
+1089	paired, is read 1, duplicate
+1201	paired, read reverse strand, mate reverse strand, is read 2, duplicate
+1137	paired, read reverse strand, mate reverse strand, is read 1, duplicate
+117	paired, read unmapped, read reverse strand, mate reverse strand, is read 1
+69	paired, read unmapped, is read 1
+185	paired, mate unmapped, read reverse strand, mate reverse strand, is read 2
+137	paired, mate unmapped, is read 2
+2195	paired, proper pair, read reverse strand, is read 2, supplementary alignment
+2211	paired, proper pair, mate reverse strand, is read 2, supplementary alignment
+2131	paired, proper pair, read reverse strand, is read 1, supplementary alignment
+2179	paired, proper pair, is read 2, supplementary alignment
+2147	paired, proper pair, mate reverse strand, is read 1, supplementary alignment
+2227	paired, proper pair, read reverse strand, mate reverse strand, is read 2, supplementary alignment
+2163	paired, proper pair, read reverse strand, mate reverse strand, is read 1, supplementary alignment
+2115	paired, proper pair, is read 1, supplementary alignment
+1145	paired, mate unmapped, read reverse strand, mate reverse strand, is read 1, duplicate
+1097	paired, mate unmapped, is read 1, duplicate
+1209	paired, mate unmapped, read reverse strand, mate reverse strand, is read 2, duplicate
+1161	paired, mate unmapped, is read 2, duplicate
+2121	paired, mate unmapped, is read 1, supplementary alignment
+2169	paired, mate unmapped, read reverse strand, mate reverse strand, is read 1, supplementary alignment
+2185	paired, mate unmapped, is read 2, supplementary alignment
+2233	paired, mate unmapped, read reverse strand, mate reverse strand, is read 2, supplementary alignment
+3233	paired, mate reverse strand, is read 2, duplicate, supplementary alignment
+3169	paired, mate reverse strand, is read 1, duplicate, supplementary alignment
+3217	paired, read reverse strand, is read 2, duplicate, supplementary alignment
+3153	paired, read reverse strand, is read 1, duplicate, supplementary alignment
+3249	paired, read reverse strand, mate reverse strand, is read 2, duplicate, supplementary alignment
+3201	paired, is read 2, duplicate, supplementary alignment
+3185	paired, read reverse strand, mate reverse strand, is read 1, duplicate, supplementary alignment
+3137	paired, is read 1, duplicate, supplementary alignment
+3145	paired, mate unmapped, is read 1, duplicate, supplementary alignment
+3209	paired, mate unmapped, is read 2, duplicate, supplementary alignment
+3193	paired, mate unmapped, read reverse strand, mate reverse strand, is read 1, duplicate, supplementary alignment
+3257	paired, mate unmapped, read reverse strand, mate reverse strand, is read 2, duplicate, supplementary alignment
+3155	paired, proper pair, read reverse strand, is read 1, duplicate, supplementary alignment
+3219	paired, proper pair, read reverse strand, is read 2, duplicate, supplementary alignment
+3235	paired, proper pair, mate reverse strand, is read 2, duplicate, supplementary alignment
+3171	paired, proper pair, mate reverse strand, is read 1, duplicate, supplementary alignment
+3203	paired, proper pair, is read 2, duplicate, supplementary alignment
+3139	paired, proper pair, is read 1, duplicate, supplementary alignment
+3251	paired, proper pair, read reverse strand, mate reverse strand, is read 2, duplicate, supplementary alignment
+3187	paired, proper pair, read reverse strand, mate reverse strand, is read 1, duplicate, supplementary alignment
