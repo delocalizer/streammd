@@ -35,8 +35,8 @@ Implementation specific:
 ## Install
 
 ```bash
-git clone https://github.com/delocalizer/mumbai
-cd mumbai
+git clone https://github.com/delocalizer/streammd
+cd streammd
 pip install -r requirements.txt --user .
 ```
 
