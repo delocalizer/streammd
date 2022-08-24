@@ -206,7 +206,8 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             testargs = list(
                 map(str, ('streammd', '--consumer-processes', 1, '--input',
-                          inf, '--output', out.name)))
+                          inf, '--output', out.name, '--metrics',
+                          '/dev/null')))
             with patch.object(sys, 'argv', testargs):
                 main()
             result = [
@@ -216,7 +217,7 @@ class TestMarkDups(TestCase):
 
     def test_main_markdups_2(self):
         """
-        Confirm that main() markdups --json-metrics operates as expected.
+        Confirm that main() markdups --metrics operates as expected.
         """
         expected = {
             'ALIGNMENTS': 4058,
@@ -227,16 +228,16 @@ class TestMarkDups(TestCase):
             'UNIQUE_ITEMS_APPROXIMATE': 1011
         }
         with (RESOURCES.joinpath('test.qname.sam') as inf,
-                NamedTemporaryFile() as out):
+                NamedTemporaryFile() as out,
+                NamedTemporaryFile() as met):
             testargs = list(
                 map(str, ('streammd', '--consumer-processes', 1, '--input',
-                          inf, '--output', out.name, '--json-metrics')))
+                          inf, '--output', out.name, '--metrics', met.name)))
             outstr = io.StringIO()
             with (patch.object(sys, 'argv', testargs),
                     self.assertLogs('streammd.markdups', level='INFO') as log):
                 main()
-                self.assertEqual(expected,
-                        json.loads(log.output[-1].split(':', 2)[-1]))
+                self.assertEqual(expected, json.load(met))
 
     def test_main_memcalc(self):
         """
