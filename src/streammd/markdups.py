@@ -28,6 +28,7 @@ DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = int(1e9)
 DEFAULT_NWORKERS = 8
 DEFAULT_SAMQSIZE = 1000
+DEFAULT_METRICS = 'streammd-metrics.json'
 
 ALIGNMENTS = 'ALIGNMENTS'
 ALIGNMENTS_MARKED_DUPLICATE = 'ALIGNMENTS_MARKED_DUPLICATE'
@@ -224,34 +225,33 @@ def mem_calc(n, p):
     return m / 8 / 1024 ** 3
 
 
-def output_metrics(metrics, asjson=False):
+def output_metrics(metrics, metfh):
     """
     Output metrics.
 
     Args:
         metrics: dict of metrics.
+        metfh: open file handle for writing.
     """
-    if asjson:
-        LOGGER.info(
-            # kludge to output rounded floats
-            # https://stackoverflow.com/a/29066406/6705037
-            json.dumps(
-                json.loads(
-                    json.dumps(metrics),
-                    parse_float=lambda x: round(float(x), 4)),
-                indent=2,
-                sort_keys=True))
-    else:
-        LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
-                    metrics[UNIQUE_ITEMS_APPROXIMATE])
-        LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
-        LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
-                    metrics[ALIGNMENTS_MARKED_DUPLICATE])
-        LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
-        LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
-                    metrics[READ_PAIRS_MARKED_DUPLICATE])
-        LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
-                    metrics[READ_PAIR_DUPLICATE_FRACTION])
+    LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
+                metrics[UNIQUE_ITEMS_APPROXIMATE])
+    LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
+    LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
+                metrics[ALIGNMENTS_MARKED_DUPLICATE])
+    LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
+    LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
+                metrics[READ_PAIRS_MARKED_DUPLICATE])
+    LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
+                metrics[READ_PAIR_DUPLICATE_FRACTION])
+    metfh.write(
+        # kludge to output rounded floats
+        # https://stackoverflow.com/a/29066406/6705037
+        json.dumps(
+            json.loads(
+                json.dumps(metrics),
+                parse_float=lambda x: round(float(x), 4)),
+            indent=2,
+            sort_keys=True))
 
 
 def parse_cmdargs(args):
@@ -261,12 +261,14 @@ def parse_cmdargs(args):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input',
                         default=0,
-                        help=('Input SAM file. If not supplied, default is '
-                              'STDIN.'))
+                        help='Input SAM file (default=STDIN).')
     parser.add_argument('--output',
                         default=1,
-                        help=('Output SAM file. If not supplied, default is '
-                              'STDOUT.'))
+                        help='Output SAM file (default=STDOUT).')
+    parser.add_argument('--metrics',
+                        default=DEFAULT_METRICS,
+                        help=('Output metrics file '
+                              f'(default={DEFAULT_METRICS}).'))
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -282,9 +284,6 @@ def parse_cmdargs(args):
                         default=DEFAULT_NWORKERS,
                         help=('Number of hashing processes '
                               f'(default={DEFAULT_NWORKERS}).'))
-    parser.add_argument('--json-metrics',
-                        action='store_true',
-                        help='Output metrics in JSON format')
     parser.add_argument('--mem-calc',
                         type=float,
                         nargs=2,
@@ -317,7 +316,9 @@ def main():
     headerq = manager.Queue(args.consumer_processes)
     samq = manager.Queue(args.queue_size)
     nconsumers = args.consumer_processes
-    with open(args.input) as infh, open(args.output, 'wt') as outfh:
+    with (open(args.input) as infh,
+          open(args.output, 'wt') as outfh,
+          open(args.metrics, 'wt') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
         producer = Process(target=samrecords,
                         args=(headerq, samq, nconsumers),
@@ -333,7 +334,7 @@ def main():
             metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
             metrics[READ_PAIR_DUPLICATE_FRACTION] = (
                     metrics[READ_PAIRS_MARKED_DUPLICATE]/metrics[READ_PAIRS])
-            output_metrics(metrics, asjson=args.json_metrics)
+            output_metrics(metrics, metfh)
 
 
 if __name__ == '__main__':
