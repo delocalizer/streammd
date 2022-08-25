@@ -3,7 +3,6 @@ Read a SAM file from STDIN, mark duplicates in a single pass and stream
 processed records to STDOUT.
 
 Input must begin with a valid SAM header, followed by qname-grouped records.
-Currently only paired reads are handled.
 
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
@@ -27,7 +26,7 @@ LOGGER.addHandler(logging.StreamHandler())
 DEFAULT_FPRATE = 1e-6
 DEFAULT_NITEMS = int(1e9)
 DEFAULT_NWORKERS = 8
-DEFAULT_SAMQSIZE = 1000
+DEFAULT_INQSIZE = 1000
 DEFAULT_METRICS = 'streammd-metrics.json'
 
 ALIGNMENTS = 'ALIGNMENTS'
@@ -45,7 +44,7 @@ MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
 MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
 
 MSG_NOHEADER = 'no header lines detected'
-MSG_QNAMEGRP = 'singleton %s: input does not appear to be qname grouped'
+MSG_QNAMEGRP = 'singleton %s: input is not paired reads or not qname grouped'
 MSG_VERSION = 'streammd version %s'
 
 SENTINEL = 'STOP'
@@ -53,42 +52,43 @@ SENTINEL = 'STOP'
 UNMAPPED = (2**31, -1, '')
 
 
-def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
+def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=50):
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
 
     Header lines are written directly to the output stream and also to the
-    header queue.
+    header Value.
 
     Args:
-        headerq: multiprocessing.Queue to put header.
-        samq: multiprocessing.Queue to put SAM records.
-        nconsumers: number of consumer processes.
-        batchsize: number of lines per batch in samq (default=50).
-        infd: input file descriptor (default=0).
-        outfd: stream file descriptor (default=1).
+        infd: Input stream file name or descriptor.
+        outfd: Output stream file descriptor.
+        header: multiprocessing.Value string to put header.
+        hlock: Lock is released when header.value is set.
+        inq: multiprocessing.Queue to put SAM records.
+        nconsumers: Number of consumer processes.
+        batchsize: Number of qnames per batch in inq (default=50).
 
     Returns:
         None
     """
+    batch = []
     group = []
     groupid = None
-    header = None
+    header_txt = None
     headlines = []
-    batch = []
     with open(infd) as infh:
         for line in infh:
             if line.startswith('@'):
                 headlines.append(line)
-                os.write(outfd, line.encode('ascii'))
             else:
-                if not header:
+                if not header_txt:
                     if not headlines:
                         raise ValueError(MSG_NOHEADER)
-                    header = ''.join(headlines)
-                    for _ in range(nconsumers):
-                        headerq.put(header)
+                    header_txt = ''.join(headlines)
+                    os.write(outfd, header_txt.encode('ascii'))
+                    header.set(header_txt)
+                    hlock.release()
                 record = line.strip()
                 qname = record.partition('\t')[0]
                 if qname == groupid:
@@ -99,25 +99,26 @@ def samrecords(headerq, samq, nconsumers, batchsize=50, infd=0, outfd=1):
                             raise ValueError(MSG_QNAMEGRP % qname)
                         batch.append(group)
                         if len(batch) == batchsize:
-                            samq.put(batch)
+                            inq.put(batch)
                             batch = []
                     groupid = qname
                     group = [record]
     batch.append(group)
-    samq.put(batch)
+    inq.put(batch)
     for _ in range(nconsumers):
-        samq.put(SENTINEL)
+        inq.put(SENTINEL)
 
 
-def markdups(bfconfig, headerq, samq, outfd=1):
+def markdups(bfconfig, header, inq, outfd):
     """
     Process SAM file records.
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        headerq: multiprocessing.Queue to get header.
-        samq: multiprocessing.Queue to get batches of paired SAM records.
-        outfd: output stream file descriptor (default=1).
+        header: multiprocessing.Value string containing header.
+        inq: multiprocessing.Queue to get batches of qname grouped SAM
+             records.
+        outfd: output stream file descriptor.
 
     Returns:
 
@@ -129,16 +130,16 @@ def markdups(bfconfig, headerq, samq, outfd=1):
         }
     """
     bf = BloomFilter.copy(bfconfig)
-    header = AlignmentHeader.from_text(headerq.get())
+    ah = AlignmentHeader.from_text(header.value)
     n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
-        batch = samq.get()
+        batch = inq.get()
         if batch == SENTINEL:
             break
         for group in batch:
             n_qname += 1
             n_align += len(group)
-            alignments = [AlignedSegment.fromstring(r, header) for r in group]
+            alignments = [AlignedSegment.fromstring(r, ah) for r in group]
             if not (ends := readends(alignments)):
                 continue
             ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
@@ -167,12 +168,99 @@ def markdups(bfconfig, headerq, samq, outfd=1):
         ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
     }
 
+
+def mem_calc(n, p):
+    """
+    Returns approximate memory requirement in GB for n items and target maximum
+    false positive rate p.
+    """
+    m, _ = BloomFilter.optimal_m_k(n, p)
+    return m / 8 / 1024 ** 3
+
+
+def output_metrics(metrics, metfh):
+    """
+    Output metrics.
+
+    Args:
+        metrics: Dict of metrics.
+        metfh: Open file handle for writing.
+    """
+    LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
+                metrics[UNIQUE_ITEMS_APPROXIMATE])
+    LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
+    LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
+                metrics[ALIGNMENTS_MARKED_DUPLICATE])
+    LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
+    LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
+                metrics[READ_PAIRS_MARKED_DUPLICATE])
+    LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
+                metrics[READ_PAIR_DUPLICATE_FRACTION])
+    metfh.write(
+        # kludge to output rounded floats
+        # https://stackoverflow.com/a/29066406/6705037
+        json.dumps(
+            json.loads(
+                json.dumps(metrics),
+                parse_float=lambda x: round(float(x), 4)),
+            indent=2,
+            sort_keys=True))
+
+
+def parse_cmdargs(args):
+    """
+    Returns: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--input',
+                        default=0,
+                        help='Input file (default=STDIN).')
+    parser.add_argument('--output',
+                        default=1,
+                        help='Output file (default=STDOUT).')
+    parser.add_argument('--metrics',
+                        default=DEFAULT_METRICS,
+                        help=('Output metrics file '
+                              f'(default={DEFAULT_METRICS}).'))
+    parser.add_argument('-n', '--n-items',
+                        type=int,
+                        default=DEFAULT_NITEMS,
+                        help=('Expected maximum number of read pairs n '
+                              f'(default={DEFAULT_NITEMS}).'))
+    parser.add_argument('-p', '--fp-rate',
+                        type=float,
+                        default=DEFAULT_FPRATE,
+                        help=('Target maximum false positive rate when n '
+                              f'items are stored (default={DEFAULT_FPRATE}).'))
+    parser.add_argument('--consumer-processes',
+                        type=int,
+                        default=DEFAULT_NWORKERS,
+                        help=('Number of hashing processes '
+                              f'(default={DEFAULT_NWORKERS}).'))
+    parser.add_argument('--in-queue-size',
+                        type=int,
+                        default=DEFAULT_INQSIZE,
+                        help=('Size of the input record queue '
+                              f'(default={DEFAULT_INQSIZE}).'))
+    parser.add_argument('--mem-calc',
+                        type=float,
+                        nargs=2,
+                        metavar=('N_ITEMS', 'FP_RATE'),
+                        help=('Print approximate memory requirement in GB '
+                        'for n items and target maximum false positive rate '
+                        'p.'))
+    parser.add_argument('--version',
+                        action='version',
+                        version=metadata.version('streammd'))
+    return parser.parse_args(args)
+
+
 def readends(alignments):
     """
     Calculate ends of the fragment, accounting for soft-clipped bases.
 
     Args:
-        alignments: qname group tuple of AlignedSegment instances.
+        alignments: Qname group tuple of AlignedSegment instances.
 
     Returns:
         None if there are no aligned reads, otherwise a coordinate-sorted pair
@@ -216,120 +304,35 @@ def readends(alignments):
     return ends
 
 
-def mem_calc(n, p):
-    """
-    Returns approximate memory requirement in GB for n items and target maximum
-    false positive rate p.
-    """
-    m, _ = BloomFilter.optimal_m_k(n, p)
-    return m / 8 / 1024 ** 3
-
-
-def output_metrics(metrics, metfh):
-    """
-    Output metrics.
-
-    Args:
-        metrics: dict of metrics.
-        metfh: open file handle for writing.
-    """
-    LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
-                metrics[UNIQUE_ITEMS_APPROXIMATE])
-    LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
-    LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
-                metrics[ALIGNMENTS_MARKED_DUPLICATE])
-    LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
-    LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
-                metrics[READ_PAIRS_MARKED_DUPLICATE])
-    LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
-                metrics[READ_PAIR_DUPLICATE_FRACTION])
-    metfh.write(
-        # kludge to output rounded floats
-        # https://stackoverflow.com/a/29066406/6705037
-        json.dumps(
-            json.loads(
-                json.dumps(metrics),
-                parse_float=lambda x: round(float(x), 4)),
-            indent=2,
-            sort_keys=True))
-
-
-def parse_cmdargs(args):
-    """
-    Returns: Parsed arguments
-    """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--input',
-                        default=0,
-                        help='Input SAM file (default=STDIN).')
-    parser.add_argument('--output',
-                        default=1,
-                        help='Output SAM file (default=STDOUT).')
-    parser.add_argument('--metrics',
-                        default=DEFAULT_METRICS,
-                        help=('Output metrics file '
-                              f'(default={DEFAULT_METRICS}).'))
-    parser.add_argument('-n', '--n-items',
-                        type=int,
-                        default=DEFAULT_NITEMS,
-                        help=('Expected maximum number of read pairs n '
-                              f'(default={DEFAULT_NITEMS}).'))
-    parser.add_argument('-p', '--fp-rate',
-                        type=float,
-                        default=DEFAULT_FPRATE,
-                        help=('Target maximum false positive rate when n '
-                              f'items are stored (default={DEFAULT_FPRATE}).'))
-    parser.add_argument('--consumer-processes',
-                        type=int,
-                        default=DEFAULT_NWORKERS,
-                        help=('Number of hashing processes '
-                              f'(default={DEFAULT_NWORKERS}).'))
-    parser.add_argument('--mem-calc',
-                        type=float,
-                        nargs=2,
-                        metavar=('N_ITEMS', 'FP_RATE'),
-                        help=('Print approximate memory requirement in GB '
-                        'for n items and target maximum false positive rate '
-                        'p.'))
-    parser.add_argument('--queue-size',
-                        type=int,
-                        default=DEFAULT_SAMQSIZE,
-                        help=('Size of the SAM record queue '
-                              f'(default={DEFAULT_SAMQSIZE}).'))
-    parser.add_argument('--version',
-                        action='version',
-                        version=metadata.version('streammd'))
-    return parser.parse_args(args)
-
-
 def main():
     """
-    Run as CLI script
+    Run as CLI script.
     """
     args = parse_cmdargs(sys.argv[1:])
     if args.mem_calc:
-        print('%0.3fGB' % mem_calc(*args.mem_calc))
+        print(f'{mem_calc(*args.mem_calc):0.3f}GB')
         sys.exit(0)
     LOGGER.info(MSG_VERSION, metadata.version('streammd'))
     LOGGER.info(' '.join(sys.argv))
     manager = Manager()
-    headerq = manager.Queue(args.consumer_processes)
-    samq = manager.Queue(args.queue_size)
+    header = manager.Value(str, '')
+    hlock = manager.Lock()
+    hlock.acquire()
+    inq = manager.Queue(args.in_queue_size)
     nconsumers = args.consumer_processes
     with (open(args.input) as infh,
-          open(args.output, 'wt') as outfh,
-          open(args.metrics, 'wt') as metfh):
+          open(args.output, 'w') as outfh,
+          open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
-        producer = Process(target=samrecords,
-                        args=(headerq, samq, nconsumers),
-                        kwargs={'infd':infd,
-                                'outfd':outfd})
-        producer.start()
+        reader = Process(target=input_alnfile,
+                         args=(infd, outfd, header, hlock, inq, nconsumers))
+        reader.start()
         with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
             bf = BloomFilter(smm, args.n_items, args.fp_rate)
-            mdargs = repeat((bf.config, headerq, samq, outfd), nconsumers)
+            hlock.acquire()
+            mdargs = repeat((bf.config, header, inq, outfd), nconsumers)
             counts = list(pool.starmap(markdups, mdargs))
-            producer.join()
+            reader.join()
             metrics = {k: sum(d[k] for d in counts) for k in counts[0]}
             metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
             metrics[READ_PAIR_DUPLICATE_FRACTION] = (
