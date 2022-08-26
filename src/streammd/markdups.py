@@ -54,7 +54,7 @@ UNMAPPED = (2**31, -1, '')
 VERSION = metadata.version(PGID)
 
 
-def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=50):
+def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
@@ -69,7 +69,7 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=50):
         hlock: Lock is released when header.value is set.
         inq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
-        batchsize: Number of qnames per batch in inq (default=50).
+        batchsize: Number of qnames per batch in inq (default=200).
 
     Returns:
         None
