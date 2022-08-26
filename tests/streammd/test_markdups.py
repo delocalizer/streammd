@@ -23,10 +23,13 @@ from streammd.markdups import (DEFAULT_FPRATE,
                                READ_PAIRS_MARKED_DUPLICATE,
                                MSG_NOHEADER,
                                MSG_QNAMEGRP,
+                               PGID,
                                UNMAPPED,
+                               VERSION,
                                input_alnfile,
                                main,
                                markdups,
+                               pgline,
                                readends)
 
 RESOURCES = files('tests.streammd.resources')
@@ -263,3 +266,38 @@ class TestMarkDups(TestCase):
                 with self.assertRaises(SystemExit):
                     main()
                 self.assertEqual(outstr.getvalue(), expected)
+
+    def test_pgline_1(self):
+        """
+        Confirm that pgline operates as expected when last line of the header
+        is @SQ.
+        """
+        last = '@SQ\tSN:chrMT\tLN:16569'
+        result = pgline(last)
+        tkns = result.strip().split('\t')
+        self.assertEqual(tkns[0], '@PG')
+        tags = {tag: value for tag, value in
+                (tkn.split(':', 1) for tkn in tkns[1:])}
+        self.assertEqual(tags.get('ID'), PGID)
+        self.assertEqual(tags.get('PN'), PGID)
+        self.assertFalse(tags.get('PP'))
+        self.assertEqual(tags.get('VN'), VERSION)
+
+    def test_pgline_2(self):
+        """
+        Confirm that pgline operates as expected when last line of the header
+        is @PG.
+        """
+        last = ('@PG\tID:bwa\tPN:bwa\tVN:0.7.15-r1140\t'
+                'CL:bwa mem -t 6 -p -K 100000000 '
+                '/reference/genomes/GRCh37_ICGC_standard_v2/indexes/'
+                'BWAKIT_0.7.12/GRCh37_ICGC_standard_v2.fa -\n')
+        result = pgline(last)
+        tkns = result.strip().split('\t')
+        self.assertEqual(tkns[0], '@PG')
+        tags = {tag: value for tag, value in
+                (tkn.split(':', 1) for tkn in tkns[1:])}
+        self.assertEqual(tags.get('ID'), PGID)
+        self.assertEqual(tags.get('PN'), PGID)
+        self.assertEqual(tags.get('PP'), 'bwa')
+        self.assertEqual(tags.get('VN'), VERSION)
