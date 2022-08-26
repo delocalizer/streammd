@@ -47,9 +47,11 @@ MSG_NOHEADER = 'no header lines detected'
 MSG_QNAMEGRP = 'singleton %s: input is not paired reads or not qname grouped'
 MSG_VERSION = 'streammd version %s'
 
+PGID = f'{__name__.partition(".")[0]}'
 SENTINEL = 'STOP'
 # refID in SAM spec is int32 so first element is > any legal value.
 UNMAPPED = (2**31, -1, '')
+VERSION = metadata.version(PGID)
 
 
 def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=50):
@@ -85,6 +87,7 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=50):
                 if not header_txt:
                     if not headlines:
                         raise ValueError(MSG_NOHEADER)
+                    headlines.append(pgline(headlines[-1]))
                     header_txt = ''.join(headlines)
                     os.write(outfd, header_txt.encode('ascii'))
                     header.set(header_txt)
@@ -151,11 +154,13 @@ def markdups(bfconfig, header, inq, outfd):
                     if a.is_mapped:
                         n_aln_dup += 1
                         a.flag += 1024
+                        a.set_tag('PG', PGID, 'Z')
             elif not bf.add(''.join(ends_str)):
                 n_rp_dup += 1
                 for a in alignments:
                     n_aln_dup += 1
                     a.flag += 1024
+                    a.set_tag('PG', PGID, 'Z')
             # Write the group as a group. In contrast to sys.stdout.write,
             # os.write is atomic so we don't have to care about locking or
             # using an output queue.
@@ -247,12 +252,36 @@ def parse_cmdargs(args):
                         nargs=2,
                         metavar=('N_ITEMS', 'FP_RATE'),
                         help=('Print approximate memory requirement in GB '
-                        'for n items and target maximum false positive rate '
-                        'p.'))
+                              'for n items and target maximum false positive '
+                              'rate p.'))
     parser.add_argument('--version',
                         action='version',
-                        version=metadata.version('streammd'))
+                        version=VERSION)
     return parser.parse_args(args)
+
+
+def pgline(last):
+    """
+    Return the @PG header line for data processed by this tool.
+
+    Args:
+        last: the last line of the header as read before processing.
+    """
+    tags = [
+        f'ID:{PGID}',
+        f'PN:{PGID}',
+        f'CL:{" ".join(sys.argv)}',
+        f'VN:{VERSION}'
+    ]
+    PP = None
+    tkns = last.strip().split('\t')
+    if tkns[0] == '@PG':
+        prev = {tag: value for tag, value in
+                (tkn.split(':', 1) for tkn in tkns[1:])}
+        PP = prev.get('ID')
+    if PP:
+        tags.insert(2, f'PP:{PP}')
+    return '\t'.join(['@PG'] + tags) + '\n'
 
 
 def readends(alignments):
@@ -312,7 +341,7 @@ def main():
     if args.mem_calc:
         print(f'{mem_calc(*args.mem_calc):0.3f}GB')
         sys.exit(0)
-    LOGGER.info(MSG_VERSION, metadata.version('streammd'))
+    LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
     manager = Manager()
     header = manager.Value(str, '')
