@@ -8,7 +8,7 @@ from sys import getsizeof
 from typing import Union 
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
-from farmhash import FarmHash64WithSeed
+from farmhash import hash64withseed
 
 
 LOGGER = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ class BloomFilter:
         seeds = list(seeds) if seeds else sorted(list(PRIMES[:k]))
         assert len(seeds) == k
         def _hasher(item):
-            return [FarmHash64WithSeed(item, seed) % m for seed in seeds]
+            return [hash64withseed(item, seed) % m for seed in seeds]
         return _hasher
 
     @classmethod

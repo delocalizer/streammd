@@ -44,50 +44,40 @@ class TestMarkDups(TestCase):
         """
         Confirm that ValueError is raised if SAM file input lacks header.
         """
-        manager = Manager()
-        header = manager.Value(str, '')
-        hlock = manager.Lock()
-        hlock.acquire()
-        inq = manager.Queue(100)
         nconsumers = 1
+        headerq = Queue(1)
+        inq = Queue(100)
         with (RESOURCES.joinpath('no_header.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_NOHEADER):
-                input_alnfile(inf, out.fileno(), header, hlock, inq,
-                              nconsumers)
+                input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
 
     def test_input_alnfile_qnamegrouped(self):
         """
         Confirm that ValueError is raised if SAM file records are not
         grouped by qname.
         """
-        manager = Manager()
-        header = manager.Value(str, '')
-        hlock = manager.Lock()
-        hlock.acquire()
-        inq = manager.Queue(100)
         nconsumers = 1
+        headerq = Queue(1)
+        inq = Queue(100)
         with (RESOURCES.joinpath('not_qnamegrouped.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
-                input_alnfile(inf, out.fileno(), header, hlock, inq, nconsumers)
+                input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
 
     def test_input_alnfile_batch_and_enqueue(self):
         """
         Confirm that SAM file header is written headerq and SAM file records
         are written to samq in batched groups as expected.
         """
-        manager = Manager()
-        header = manager.Value(str, '')
-        hlock = manager.Lock()
-        hlock.acquire()
-        inq = manager.Queue(100)
         nconsumers = 2
+        headerq = Queue(1)
+        inq = Queue(100)
         with (RESOURCES.joinpath('6_good_records.sam') as inf,
                 NamedTemporaryFile() as out):
-            input_alnfile(inf, out.fileno(), header, hlock, inq, nconsumers)
+            input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
         # Header is set.
-        self.assertTrue(len(header.get()) > 0)
+        self.assertTrue(headerq.qsize(), 1)
         # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
         self.assertEqual(inq.qsize(), 1 + nconsumers)
         # 3 QNAME groups in the batch, each with one pair.
@@ -184,12 +174,10 @@ class TestMarkDups(TestCase):
         """
         Confirm that duplicates are marked as expected.
         """
-        manager = Manager()
-        header = manager.Value(str, '')
-        hlock = manager.Lock()
-        hlock.acquire()
-        inq = manager.Queue(100)
         nconsumers = 1
+        headerq = Queue(1)
+        inq = Queue(100)
+        outq = Queue(nconsumers)
         expected = [
             (alignment.qname, alignment.flag) for alignment in
             AlignmentFile(RESOURCES.joinpath('test.qname.streammd.sam'))]
@@ -197,9 +185,11 @@ class TestMarkDups(TestCase):
                 RESOURCES.joinpath('test.qname.sam') as inf,
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
-            input_alnfile(inf, outfd, header, hlock, inq, nconsumers)
+            input_alnfile(inf, outfd, headerq, inq, nconsumers)
+            header = headerq.get()
             bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
-            counts = markdups(bf.config, header, inq, outfd)
+            markdups(bf.config, header, inq, outq, outfd)
+            counts = outq.get()
             self.assertEqual(counts[READ_PAIRS], 2027)
             self.assertEqual(counts[READ_PAIRS_MARKED_DUPLICATE], 1018)
             self.assertEqual(counts[ALIGNMENTS], 4058)

@@ -9,8 +9,8 @@ at the end of processing.
 
 ### Features
 
-* Very fast — with default settings `streammd` is typically 3-4x faster than
-  Picard MarkDuplicates.
+* Very fast — with default settings `streammd` is typically &#8776; 3x faster
+  than Picard MarkDuplicates.
 * Low memory use, even for large libraries — with default settings `streammd`
   requires less than 4GB to process 1B read pairs.
 * High concordance with Picard MarkDuplicates metrics.
@@ -71,9 +71,6 @@ maximum false positive rate `p`:
 
 |    n     |    p     |   mem    |
 | -------- | -------- | -------- |
-| 1.00E+06 | 1.00E-03 | 0.002GB  |
-| 1.00E+06 | 1.00E-06 | 0.003GB  |
-| 1.00E+06 | 1.00E-09 | 0.005GB  |
 | 1.00E+07 | 1.00E-03 | 0.017GB  |
 | 1.00E+07 | 1.00E-06 | 0.033GB  |
 | 1.00E+07 | 1.00E-09 | 0.050GB  |
@@ -93,9 +90,9 @@ n &#8776; 6.00E+08 templates.
 When using the default settings `streammd` writes outputs to STDOUT extremely
 rapidly. In a pipeline this can mean anything downstream will become a
 bottleneck if it can't process its inputs fast enough — for example, if you
-want to write the outputs to bam format using `samtools view` you should use 8
-or more compression threads for optimal speed:
+want to write the outputs to bam format using `samtools view` you should use 
+extra compression threads for optimal throughput:
 
 ```bash
-samtools view -h some.bam|streammd|samtools view -@8 -o some.MD.bam
+samtools view -h some.bam|streammd|samtools view -@4 -o some.MD.bam
 ```

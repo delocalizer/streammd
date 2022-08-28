@@ -9,7 +9,8 @@ environment variable.
 """
 from importlib import metadata
 from itertools import repeat
-from multiprocessing import Manager, Pool, Process
+from math import ceil
+from multiprocessing import Pool, Process, Queue
 from multiprocessing.managers import SharedMemoryManager
 import argparse
 import json
@@ -24,9 +25,9 @@ LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 LOGGER.addHandler(logging.StreamHandler())
 
 DEFAULT_FPRATE = 1e-6
-DEFAULT_NITEMS = int(1e9)
-DEFAULT_NWORKERS = 8
-DEFAULT_INQSIZE = 1000
+DEFAULT_NITEMS = 1e9
+DEFAULT_NWORKERS = 4
+DEFAULT_INQSIZE = 100
 DEFAULT_METRICS = 'streammd-metrics.json'
 
 ALIGNMENTS = 'ALIGNMENTS'
@@ -36,6 +37,7 @@ READ_PAIRS_MARKED_DUPLICATE = 'READ_PAIRS_MARKED_DUPLICATE'
 READ_PAIR_DUPLICATE_FRACTION = 'READ_PAIR_DUPLICATE_FRACTION'
 UNIQUE_ITEMS_APPROXIMATE = 'UNIQUE_ITEMS_APPROXIMATE'
 
+MSG_BATCHSIZE = 'running with batchsize=%s'
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
 MSG_READ_PAIRS = 'read pairs seen: %s'
@@ -54,7 +56,7 @@ UNMAPPED = (2**31, -1, '')
 VERSION = metadata.version(PGID)
 
 
-def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
+def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
@@ -65,11 +67,11 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
     Args:
         infd: Input stream file name or descriptor.
         outfd: Output stream file descriptor.
-        header: multiprocessing.Value string to put header.
-        hlock: Lock is released when header.value is set.
+        headerq: multiprocessing.Queue to put header text.
         inq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
-        batchsize: Number of qnames per batch in inq (default=200).
+        batchsize: Number of qnames per batch put to inq. If not specified, the
+                   heuristic 250/nconsumers is used.
 
     Returns:
         None
@@ -79,6 +81,8 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
     groupid = None
     header_txt = None
     headlines = []
+    batchsize = batchsize or ceil(250/nconsumers)
+    LOGGER.info(MSG_BATCHSIZE, batchsize)
     with open(infd) as infh:
         for line in infh:
             if line.startswith('@'):
@@ -90,8 +94,7 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
                     headlines.append(pgline(headlines[-1]))
                     header_txt = ''.join(headlines)
                     os.write(outfd, header_txt.encode('ascii'))
-                    header.set(header_txt)
-                    hlock.release()
+                    headerq.put(header_txt)
                 record = line.strip()
                 qname = record.partition('\t')[0]
                 if qname == groupid:
@@ -112,18 +115,19 @@ def input_alnfile(infd, outfd, header, hlock, inq, nconsumers, batchsize=200):
         inq.put(SENTINEL)
 
 
-def markdups(bfconfig, header, inq, outfd):
+def markdups(bfconfig, header, inq, outq, outfd):
     """
     Process SAM file records.
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        header: multiprocessing.Value string containing header.
+        header: SAM file header as string.
         inq: multiprocessing.Queue to get batches of qname grouped SAM
              records.
+        outq: multiprocessing.Queue to put results.
         outfd: output stream file descriptor.
 
-    Returns:
+    Results are added to the queue as:
 
         {
             READ_PAIRS: n_qname,                    # read pairs (qnames) seen
@@ -133,7 +137,7 @@ def markdups(bfconfig, header, inq, outfd):
         }
     """
     bf = BloomFilter.copy(bfconfig)
-    ah = AlignmentHeader.from_text(header.value)
+    ah = AlignmentHeader.from_text(header)
     n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = inq.get()
@@ -166,12 +170,12 @@ def markdups(bfconfig, header, inq, outfd):
             # using an output queue.
             out = '\n'.join(a.to_string() for a in alignments) + '\n'
             os.write(outfd, out.encode('ascii'))
-    return {
+    outq.put({
         READ_PAIRS: n_qname,
         READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
         ALIGNMENTS: n_align,
         ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
-    }
+    })
 
 
 def mem_calc(n, p):
@@ -231,22 +235,22 @@ def parse_cmdargs(args):
                         type=int,
                         default=DEFAULT_NITEMS,
                         help=('Expected maximum number of read pairs n '
-                              f'(default={DEFAULT_NITEMS}).'))
+                              f'(default={DEFAULT_NITEMS:.2E}).'))
     parser.add_argument('-p', '--fp-rate',
                         type=float,
                         default=DEFAULT_FPRATE,
-                        help=('Target maximum false positive rate when n '
-                              f'items are stored (default={DEFAULT_FPRATE}).'))
+                        help=('Target maximum false positive rate when n items '
+                              f'are stored (default={DEFAULT_FPRATE:.2E}).'))
     parser.add_argument('--consumer-processes',
                         type=int,
                         default=DEFAULT_NWORKERS,
                         help=('Number of hashing processes '
                               f'(default={DEFAULT_NWORKERS}).'))
-    parser.add_argument('--in-queue-size',
+    parser.add_argument('--input-batch-size',
                         type=int,
-                        default=DEFAULT_INQSIZE,
-                        help=('Size of the input record queue '
-                              f'(default={DEFAULT_INQSIZE}).'))
+                        help=('Specify the number of SAM records in each '
+                              'batch for the input queue. If not specified '
+                              'the heuristic 250/nconsumers is used.'))
     parser.add_argument('--mem-calc',
                         type=float,
                         nargs=2,
@@ -343,30 +347,35 @@ def main():
         sys.exit(0)
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
-    manager = Manager()
-    header = manager.Value(str, '')
-    hlock = manager.Lock()
-    hlock.acquire()
-    inq = manager.Queue(args.in_queue_size)
     nconsumers = args.consumer_processes
-    with (open(args.input) as infh,
+    inputbatchsize = args.input_batch_size
+    headerq = Queue(1)
+    inq = Queue(DEFAULT_INQSIZE)
+    outq = Queue(nconsumers)
+    with (SharedMemoryManager() as smm,
+          open(args.input) as infh,
           open(args.output, 'w') as outfh,
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
         reader = Process(target=input_alnfile,
-                         args=(infd, outfd, header, hlock, inq, nconsumers))
+                         args=(infd, outfd, headerq, inq, nconsumers,
+                               inputbatchsize))
         reader.start()
-        with SharedMemoryManager() as smm, Pool(nconsumers) as pool:
-            bf = BloomFilter(smm, args.n_items, args.fp_rate)
-            hlock.acquire()
-            mdargs = repeat((bf.config, header, inq, outfd), nconsumers)
-            counts = list(pool.starmap(markdups, mdargs))
-            reader.join()
-            metrics = {k: sum(d[k] for d in counts) for k in counts[0]}
-            metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
-            metrics[READ_PAIR_DUPLICATE_FRACTION] = (
-                    metrics[READ_PAIRS_MARKED_DUPLICATE]/metrics[READ_PAIRS])
-            output_metrics(metrics, metfh)
+        header = headerq.get()
+        bf = BloomFilter(smm, args.n_items, args.fp_rate)
+        consumers = [                                                       
+            Process(target=markdups, args=(bf.config, header, inq, outq, outfd))
+            for _ in range(nconsumers)                                      
+        ]                                                                   
+        list(map(lambda x: x.start(), consumers))    
+        list(map(lambda x: x.join(), consumers))
+        reader.join()
+        counts = [outq.get() for _ in range(nconsumers)]
+        metrics = {k: sum(d[k] for d in counts) for k in counts[0]}
+        metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
+        metrics[READ_PAIR_DUPLICATE_FRACTION] = (
+                metrics[READ_PAIRS_MARKED_DUPLICATE]/metrics[READ_PAIRS])
+        output_metrics(metrics, metfh)
 
 
 if __name__ == '__main__':
