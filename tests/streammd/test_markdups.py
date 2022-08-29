@@ -291,3 +291,33 @@ class TestMarkDups(TestCase):
         self.assertEqual(tags.get('PN'), PGID)
         self.assertEqual(tags.get('PP'), 'bwa')
         self.assertEqual(tags.get('VN'), VERSION)
+
+    def test_unmapped(self):
+        """
+        Confirm that records with both read and mate unmapped appear in the
+        output.
+        """
+        nconsumers = 1
+        headerq = Queue(1)
+        inq = Queue(100)
+        outq = Queue(nconsumers)
+        expected = [
+            ('HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678', 77),
+            ('HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678', 141)]
+        with (SharedMemoryManager() as smm,
+                RESOURCES.joinpath('test.unmapped.sam') as inf,
+                NamedTemporaryFile() as out):
+            outfd=out.fileno()
+            input_alnfile(inf, outfd, headerq, inq, nconsumers)
+            header = headerq.get()
+            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            markdups(bf.config, header, inq, outq, outfd)
+            counts = outq.get()
+            self.assertEqual(counts[READ_PAIRS], 1)
+            self.assertEqual(counts[READ_PAIRS_MARKED_DUPLICATE], 0)
+            self.assertEqual(counts[ALIGNMENTS], 2)
+            self.assertEqual(counts[ALIGNMENTS_MARKED_DUPLICATE], 0)
+            result = [
+                (alignment.qname, alignment.flag) for alignment in
+                AlignmentFile(out.name)]
+            self.assertEqual(result, expected)

@@ -151,35 +151,37 @@ def markdups(bfconfig, header, inq, outq, outfd):
     n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = inq.get()
+        outlines = []
         if batch == SENTINEL:
             break
         for group in batch:
             n_qname += 1
             n_align += len(group)
             alignments = [AlignedSegment.fromstring(r, ah) for r in group]
-            if not (ends := readends(alignments)):
-                continue
-            ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
-            if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
-                n_rp_dup += 1
-                for a in alignments:
-                    # Replicate Picard MarkDuplicates behaviour: only the
-                    # aligned read is marked as duplicate.
-                    if a.is_mapped:
+            if (ends := readends(alignments)):
+                ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
+                if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
+                    n_rp_dup += 1
+                    for a in alignments:
+                        # Replicate Picard MarkDuplicates behaviour: only the
+                        # aligned read is marked as duplicate.
+                        if a.is_mapped:
+                            n_aln_dup += 1
+                            a.flag += 1024
+                            a.set_tag('PG', PGID, 'Z')
+                elif not bf.add(''.join(ends_str)):
+                    n_rp_dup += 1
+                    for a in alignments:
                         n_aln_dup += 1
                         a.flag += 1024
                         a.set_tag('PG', PGID, 'Z')
-            elif not bf.add(''.join(ends_str)):
-                n_rp_dup += 1
-                for a in alignments:
-                    n_aln_dup += 1
-                    a.flag += 1024
-                    a.set_tag('PG', PGID, 'Z')
-            # Write the group as a group. In contrast to sys.stdout.write,
-            # os.write is atomic so we don't have to care about locking or
-            # using an output queue.
-            out = '\n'.join(a.to_string() for a in alignments) + '\n'
-            os.write(outfd, out.encode('ascii'))
+            for a in alignments:
+                outlines.append(a.to_string())
+        # Write the batch as a batch. In contrast to sys.stdout.write,
+        # os.write is atomic so we don't have to care about locking or
+        # using an output queue.
+        out = '\n'.join(outlines) + '\n'
+        os.write(outfd, out.encode('ascii'))
     outq.put({
         READ_PAIRS: n_qname,
         READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
