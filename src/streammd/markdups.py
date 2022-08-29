@@ -52,9 +52,9 @@ CIGAR_CONSUMES_REF = {'M', 'D', 'N', '=', 'X'}
 # DEL sorts last in ascii
 DEL = b'\x7F'.decode('ascii')
 PGID = f'{__name__.partition(".")[0]}'
+RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))')
 RE_LEADING_S = re.compile(r'^(\d+)S')
 RE_TRAILING_S = re.compile(r'(\d+)S$')
-RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))')
 SENTINEL = 'STOP'
 UNMAPPED = (DEL, -1, '')
 VERSION = metadata.version(PGID)
@@ -387,11 +387,11 @@ def main():
                          args=(infd, outfd, inq, nconsumers, inputbatchsize))
         reader.start()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        consumers = [                                                       
+        consumers = [
             Process(target=markdups, args=(bf.config, inq, outq, outfd))
-            for _ in range(nconsumers)                                      
-        ]                                                                   
-        list(map(lambda x: x.start(), consumers))    
+            for _ in range(nconsumers)
+        ]
+        list(map(lambda x: x.start(), consumers))
         list(map(lambda x: x.join(), consumers))
         reader.join()
         counts = [outq.get() for _ in range(nconsumers)]
