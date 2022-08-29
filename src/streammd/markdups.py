@@ -25,10 +25,10 @@ LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 LOGGER.addHandler(logging.StreamHandler())
 
 DEFAULT_FPRATE = 1e-6
+DEFAULT_LOGINTERVAL = 1000000
+DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
 DEFAULT_NWORKERS = 4
-DEFAULT_INQSIZE = 100
-DEFAULT_METRICS = 'streammd-metrics.json'
 
 ALIGNMENTS = 'ALIGNMENTS'
 ALIGNMENTS_MARKED_DUPLICATE = 'ALIGNMENTS_MARKED_DUPLICATE'
@@ -37,16 +37,16 @@ READ_PAIRS_MARKED_DUPLICATE = 'READ_PAIRS_MARKED_DUPLICATE'
 READ_PAIR_DUPLICATE_FRACTION = 'READ_PAIR_DUPLICATE_FRACTION'
 UNIQUE_ITEMS_APPROXIMATE = 'UNIQUE_ITEMS_APPROXIMATE'
 
-MSG_BATCHSIZE = 'running with batchsize=%s'
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
+MSG_BATCHSIZE = 'running with batchsize=%s'
+MSG_NOHEADER = 'no header lines detected'
+MSG_QNAMEGRP = 'singleton %s: input is not paired reads or not qname grouped'
+MSG_QSIZE = 'after %s qnames seen, approx input queue size is %s'
 MSG_READ_PAIRS = 'read pairs seen: %s'
 MSG_READ_PAIRS_MARKED_DUPLICATE = 'read pairs marked duplicate: %s'
 MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
 MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
-
-MSG_NOHEADER = 'no header lines detected'
-MSG_QNAMEGRP = 'singleton %s: input is not paired reads or not qname grouped'
 MSG_VERSION = 'streammd version %s'
 
 PGID = f'{__name__.partition(".")[0]}'
@@ -62,7 +62,7 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
     in batches.
 
     Header lines are written directly to the output stream and also to the
-    header Value.
+    header Queue.
 
     Args:
         infd: Input stream file name or descriptor.
@@ -70,12 +70,19 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
         headerq: multiprocessing.Queue to put header text.
         inq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
-        batchsize: Number of qnames per batch put to inq. If not specified, the
-                   heuristic 250/nconsumers is used.
+        batchsize: Number of qnames per batch put into inq. The reader operates
+            at fixed speed so bigger batch size => lower rate at which batches
+            are added to the queue. Up to a point this reduces queue overhead
+            (fewer put/get ops) but beyond that the rate of supply to the queue
+            falls below the number required to keep all consumers sufficiently
+            fed, and they end up blocking on get calls. If a batchsize value is
+            not specified, the heuristic 250/nconsumers is used. Empirically
+            this works quite well at least for 1 <= nconsumers <= 8.
 
     Returns:
         None
     """
+    count = 0
     batch = []
     group = []
     groupid = None
@@ -104,6 +111,9 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
                         if not len(group) > 1:
                             raise ValueError(MSG_QNAMEGRP % qname)
                         batch.append(group)
+                        count += 1
+                        if not count % DEFAULT_LOGINTERVAL:
+                            LOGGER.debug(MSG_QSIZE, count, inq.qsize())
                         if len(batch) == batchsize:
                             inq.put(batch)
                             batch = []
@@ -350,7 +360,7 @@ def main():
     nconsumers = args.consumer_processes
     inputbatchsize = args.input_batch_size
     headerq = Queue(1)
-    inq = Queue(DEFAULT_INQSIZE)
+    inq = Queue(20 * nconsumers)
     outq = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
           open(args.input) as infh,
