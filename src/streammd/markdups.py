@@ -8,16 +8,15 @@ Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
 from importlib import metadata
-from itertools import repeat
 from math import ceil
-from multiprocessing import Pool, Process, Queue
+from multiprocessing import Process, Queue
 from multiprocessing.managers import SharedMemoryManager
 import argparse
 import json
 import logging
 import os
+import re
 import sys
-from pysam import AlignmentHeader, AlignedSegment
 from .bloomfilter import BloomFilter
 
 LOGGER = logging.getLogger(__name__)
@@ -49,25 +48,28 @@ MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
 MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
 MSG_VERSION = 'streammd version %s'
 
+CIGAR_CONSUMES_REF = {'M', 'D', 'N', '=', 'X'}
+# DEL sorts last in ascii
+DEL = b'\x7F'.decode('ascii')
 PGID = f'{__name__.partition(".")[0]}'
+RE_LEADING_S = re.compile(r'^(\d+)S')
+RE_TRAILING_S = re.compile(r'(\d+)S$')
+RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))')
 SENTINEL = 'STOP'
-# refID in SAM spec is int32 so first element is > any legal value.
-UNMAPPED = (2**31, -1, '')
+UNMAPPED = (DEL, -1, '')
 VERSION = metadata.version(PGID)
 
 
-def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
+def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
 
-    Header lines are written directly to the output stream and also to the
-    header Queue.
+    Header lines are written directly to the output stream.
 
     Args:
         infd: Input stream file name or descriptor.
         outfd: Output stream file descriptor.
-        headerq: multiprocessing.Queue to put header text.
         inq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
         batchsize: Number of qnames per batch put into inq. The reader operates
@@ -76,7 +78,7 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
             (fewer put/get ops) but beyond that the rate of supply to the queue
             falls below the number required to keep all consumers sufficiently
             fed, and they end up blocking on get calls. If a batchsize value is
-            not specified, the heuristic 250/nconsumers is used. Empirically
+            not specified, the heuristic 400/nconsumers is used. Empirically
             this works quite well at least for 1 <= nconsumers <= 8.
 
     Returns:
@@ -88,7 +90,7 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
     groupid = None
     header_txt = None
     headlines = []
-    batchsize = batchsize or ceil(250/nconsumers)
+    batchsize = batchsize or ceil(400/nconsumers)
     LOGGER.info(MSG_BATCHSIZE, batchsize)
     with open(infd) as infh:
         for line in infh:
@@ -101,7 +103,6 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
                     headlines.append(pgline(headlines[-1]))
                     header_txt = ''.join(headlines)
                     os.write(outfd, header_txt.encode('ascii'))
-                    headerq.put(header_txt)
                 record = line.strip()
                 qname = record.partition('\t')[0]
                 if qname == groupid:
@@ -125,13 +126,12 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
         inq.put(SENTINEL)
 
 
-def markdups(bfconfig, header, inq, outq, outfd):
+def markdups(bfconfig, inq, outq, outfd):
     """
     Process SAM file records.
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        header: SAM file header as string.
         inq: multiprocessing.Queue to get batches of qname grouped SAM
              records.
         outq: multiprocessing.Queue to put results.
@@ -147,7 +147,6 @@ def markdups(bfconfig, header, inq, outq, outfd):
         }
     """
     bf = BloomFilter.copy(bfconfig)
-    ah = AlignmentHeader.from_text(header)
     n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = inq.get()
@@ -157,7 +156,10 @@ def markdups(bfconfig, header, inq, outq, outfd):
         for group in batch:
             n_qname += 1
             n_align += len(group)
-            alignments = [AlignedSegment.fromstring(r, ah) for r in group]
+            alignments = [r.split('\t') for r in group]
+            for a in alignments:
+                a[1] = int(a[1]) # FLAG
+                a[3] = int(a[3]) # POS
             if (ends := readends(alignments)):
                 ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
                 if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
@@ -165,18 +167,16 @@ def markdups(bfconfig, header, inq, outq, outfd):
                     for a in alignments:
                         # Replicate Picard MarkDuplicates behaviour: only the
                         # aligned read is marked as duplicate.
-                        if a.is_mapped:
+                        if not a[1] & 4: # is mapped
                             n_aln_dup += 1
-                            a.flag += 1024
-                            a.set_tag('PG', PGID, 'Z')
+                            a[1] += 1024
                 elif not bf.add(''.join(ends_str)):
                     n_rp_dup += 1
                     for a in alignments:
                         n_aln_dup += 1
-                        a.flag += 1024
-                        a.set_tag('PG', PGID, 'Z')
+                        a[1] += 1024
             for a in alignments:
-                outlines.append(a.to_string())
+                outlines.append('\t'.join(map(str, a)))
         # Write the batch as a batch. In contrast to sys.stdout.write,
         # os.write is atomic so we don't have to care about locking or
         # using an output queue.
@@ -261,8 +261,8 @@ def parse_cmdargs(args):
     parser.add_argument('--input-batch-size',
                         type=int,
                         help=('Specify the number of SAM records in each '
-                              'batch for the input queue. If not specified '
-                              'the heuristic 250/nconsumers is used.'))
+                              'batch for the input queue. If not specified, '
+                              'the heuristic 400/nconsumers is used.'))
     parser.add_argument('--mem-calc',
                         type=float,
                         nargs=2,
@@ -305,7 +305,7 @@ def readends(alignments):
     Calculate ends of the fragment, accounting for soft-clipped bases.
 
     Args:
-        alignments: Qname group tuple of AlignedSegment instances.
+        alignments: QNAME group tuple of SAM record strings.
 
     Returns:
         None if there are no aligned reads, otherwise a coordinate-sorted pair
@@ -320,29 +320,44 @@ def readends(alignments):
     ends = [UNMAPPED, UNMAPPED]
 
     # Pick the primary alignments.
-    for alignment in alignments:
-        if not (alignment.is_secondary or alignment.is_supplementary):
-            if alignment.is_read1:
-                r12[0] = alignment
-            elif alignment.is_read2:
-                r12[1] = alignment
+    for a in alignments:
+        # not secondary or supplementary
+        if not (a[1] & 256 or a[1] & 2048):
+            # first
+            if a[1] & 64:
+                r12[0] = a
+            # second
+            elif a[1] & 128:
+                r12[1] = a
 
     # Bail if neither aligns.
-    if all(r.is_unmapped for r in r12):
+    if all(r[1] & 4 for r in r12):
         return None
 
     # Calculate the ends.
     for i, r in enumerate(r12):
-        if r.is_unmapped:
-            pass
-        elif r.is_forward:
+        flag            = r[1]
+        rname           = r[2]
+        pos = ref_start = r[3]
+        cigar           = r[5]
+        # unmapped
+        if flag & 4:
+            continue
+        # forward
+        if not flag & 16:
             # Leading soft clips.
-            front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-            ends[i] = r.reference_id, r.reference_start - front_s, 'F'
-        elif r.is_reverse:
-            # Trailing soft clips.
-            back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-            ends[i] = r.reference_id, r.reference_end + back_s, 'R'
+            match = RE_LEADING_S.search(cigar)
+            leading_s = int(match.group(1)) if match else 0
+            ends[i] = rname, ref_start - leading_s, 'F'
+        # reverse
+        else:
+            # Trailing soft clips
+            match = RE_TRAILING_S.search(cigar)
+            trailing_s = int(match.group(1)) if match else 0
+            ref_end = ref_start
+            for num, op in RE_CIGAR.findall(cigar):
+                ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
+            ends[i] = rname, ref_end + trailing_s, 'R'
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
@@ -361,7 +376,6 @@ def main():
     LOGGER.info(' '.join(sys.argv))
     nconsumers = args.consumer_processes
     inputbatchsize = args.input_batch_size
-    headerq = Queue(1)
     inq = Queue(20 * nconsumers)
     outq = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
@@ -370,13 +384,11 @@ def main():
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
         reader = Process(target=input_alnfile,
-                         args=(infd, outfd, headerq, inq, nconsumers,
-                               inputbatchsize))
+                         args=(infd, outfd, inq, nconsumers, inputbatchsize))
         reader.start()
-        header = headerq.get()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
         consumers = [                                                       
-            Process(target=markdups, args=(bf.config, header, inq, outq, outfd))
+            Process(target=markdups, args=(bf.config, inq, outq, outfd))
             for _ in range(nconsumers)                                      
         ]                                                                   
         list(map(lambda x: x.start(), consumers))    
