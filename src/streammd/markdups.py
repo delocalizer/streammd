@@ -8,16 +8,15 @@ Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
 from importlib import metadata
-from itertools import repeat
 from math import ceil
-from multiprocessing import Pool, Process, Queue
+from multiprocessing import Process, Queue
 from multiprocessing.managers import SharedMemoryManager
 import argparse
 import json
 import logging
 import os
+import re
 import sys
-from pysam import AlignmentHeader, AlignedSegment
 from .bloomfilter import BloomFilter
 
 LOGGER = logging.getLogger(__name__)
@@ -49,25 +48,35 @@ MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
 MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
 MSG_VERSION = 'streammd version %s'
 
+CIGAR_CONSUMES_REF = {'M', 'D', 'N', '=', 'X'}
+FLAG_UNMAPPED = 4
+FLAG_REVERSE = 16
+FLAG_SECONDARY = 256
+FLAG_DUPLICATE = 1024
+FLAG_SUPPLEMENTARY = 2048
 PGID = f'{__name__.partition(".")[0]}'
+PGTAG = 'PG:Z'
+RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))').findall
+RE_LEADING_S = re.compile(r'^(\d+)S').search
+RE_TRAILING_S = re.compile(r'(\d+)S$').search
+SAM_OPTS_IDX = 11
 SENTINEL = 'STOP'
-# refID in SAM spec is int32 so first element is > any legal value.
-UNMAPPED = (2**31, -1, '')
+# DEL sorts last in ascii
+DEL = b'\x7F'.decode('ascii')
+UNMAPPED = (DEL, -1, '')
 VERSION = metadata.version(PGID)
 
 
-def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
+def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
 
-    Header lines are written directly to the output stream and also to the
-    header Queue.
+    Header lines are written directly to the output stream.
 
     Args:
         infd: Input stream file name or descriptor.
         outfd: Output stream file descriptor.
-        headerq: multiprocessing.Queue to put header text.
         inq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
         batchsize: Number of qnames per batch put into inq. The reader operates
@@ -76,62 +85,89 @@ def input_alnfile(infd, outfd, headerq, inq, nconsumers, batchsize=None):
             (fewer put/get ops) but beyond that the rate of supply to the queue
             falls below the number required to keep all consumers sufficiently
             fed, and they end up blocking on get calls. If a batchsize value is
-            not specified, the heuristic 250/nconsumers is used. Empirically
+            not specified, the heuristic 400/nconsumers is used. Empirically
             this works quite well at least for 1 <= nconsumers <= 8.
 
     Returns:
         None
     """
-    count = 0
+    n_qname = 0
     batch = []
-    group = []
-    groupid = None
-    header_txt = None
+    qname_group = []
+    qname_last = None
+    header_done = None
     headlines = []
-    batchsize = batchsize or ceil(250/nconsumers)
+    batchsize = batchsize or ceil(400/nconsumers)
     LOGGER.info(MSG_BATCHSIZE, batchsize)
     with open(infd) as infh:
         for line in infh:
-            if line.startswith('@'):
+            if header_done:
+                qname = line.partition('\t')[0]
+                if qname == qname_last:
+                    qname_group.append(line)
+                else:
+                    if len(qname_group) < 2:
+                        raise ValueError(MSG_QNAMEGRP % qname)
+                    n_qname += 1
+                    if n_qname % DEFAULT_LOGINTERVAL == 0:
+                        LOGGER.debug(MSG_QSIZE, n_qname, inq.qsize())
+                    batch.append(qname_group)
+                    if len(batch) == batchsize:
+                        inq.put(batch)
+                        batch = []
+                    qname_last = qname
+                    qname_group = [line]
+            elif line.startswith('@'):
                 headlines.append(line)
             else:
-                if not header_txt:
-                    if not headlines:
-                        raise ValueError(MSG_NOHEADER)
-                    headlines.append(pgline(headlines[-1]))
-                    header_txt = ''.join(headlines)
-                    os.write(outfd, header_txt.encode('ascii'))
-                    headerq.put(header_txt)
-                record = line.strip()
-                qname = record.partition('\t')[0]
-                if qname == groupid:
-                    group.append(record)
-                else:
-                    if group:
-                        if not len(group) > 1:
-                            raise ValueError(MSG_QNAMEGRP % qname)
-                        batch.append(group)
-                        count += 1
-                        if not count % DEFAULT_LOGINTERVAL:
-                            LOGGER.debug(MSG_QSIZE, count, inq.qsize())
-                        if len(batch) == batchsize:
-                            inq.put(batch)
-                            batch = []
-                    groupid = qname
-                    group = [record]
-    batch.append(group)
+                if not headlines:
+                    raise ValueError(MSG_NOHEADER)
+                headlines.append(pgline(headlines[-1]))
+                header_done = ''.join(headlines)
+                os.write(outfd, header_done.encode('ascii'))
+                qname_last = line.partition('\t')[0]
+                qname_group = [line]
+    batch.append(qname_group)
     inq.put(batch)
     for _ in range(nconsumers):
         inq.put(SENTINEL)
 
 
-def markdups(bfconfig, header, inq, outq, outfd):
+def markdup(record):
+    """
+    Mark the record as duplicate by updating in-place the FLAG, adding or
+    updating the PG:Z: tag, and returning 1.
+
+    If the record is unmapped, no update is done and 0 is returned.
+
+    Args:
+        record: list of SAM record str tokens.
+
+    Retuns:
+        number of duplicates marked: 1 if updated or 0 if not (unmapped read).
+    """
+    flag = int(record[1])
+    # Replicate Picard MarkDuplicates behaviour: only an aligned read is
+    # marked as duplicate.
+    if flag & FLAG_UNMAPPED:
+        return 0
+    record[1] = str(flag + FLAG_DUPLICATE)
+    pg_old, pg_new = None, f'{PGTAG}:{PGID}'
+    for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
+        if opt.startswith(PGTAG):
+            pg_old = opt
+            record[i] = pg_new
+    if not pg_old:
+        record.append(pg_new)
+    return 1
+
+
+def markdups(bfconfig, inq, outq, outfd):
     """
     Process SAM file records.
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        header: SAM file header as string.
         inq: multiprocessing.Queue to get batches of qname grouped SAM
              records.
         outq: multiprocessing.Queue to put results.
@@ -147,7 +183,6 @@ def markdups(bfconfig, header, inq, outq, outfd):
         }
     """
     bf = BloomFilter.copy(bfconfig)
-    ah = AlignmentHeader.from_text(header)
     n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = inq.get()
@@ -157,35 +192,29 @@ def markdups(bfconfig, header, inq, outq, outfd):
         for group in batch:
             n_qname += 1
             n_align += len(group)
-            alignments = [AlignedSegment.fromstring(r, ah) for r in group]
-            if (ends := readends(alignments)):
+            qnamegrp = [r.strip().split('\t') for r in group]
+            if (ends := readends(qnamegrp)):
                 ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
-                if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
+                if (
+                        # one end mapped and is dupe
+                        (ends[1] == UNMAPPED and not bf.add(ends_str[0])) or
+                        # both ends mapped and frag is dupe
+                        not bf.add(''.join(ends_str))
+                ):
                     n_rp_dup += 1
-                    for a in alignments:
-                        # Replicate Picard MarkDuplicates behaviour: only the
-                        # aligned read is marked as duplicate.
-                        if a.is_mapped:
-                            n_aln_dup += 1
-                            a.flag += 1024
-                            a.set_tag('PG', PGID, 'Z')
-                elif not bf.add(''.join(ends_str)):
-                    n_rp_dup += 1
-                    for a in alignments:
-                        n_aln_dup += 1
-                        a.flag += 1024
-                        a.set_tag('PG', PGID, 'Z')
-            for a in alignments:
-                outlines.append(a.to_string())
+                    for read in qnamegrp:
+                        n_aln_dup += markdup(read)
+            for read in qnamegrp:
+                outlines.append('\t'.join(read))
         # Write the batch as a batch. In contrast to sys.stdout.write,
         # os.write is atomic so we don't have to care about locking or
         # using an output queue.
         out = '\n'.join(outlines) + '\n'
         os.write(outfd, out.encode('ascii'))
     outq.put({
-        READ_PAIRS: n_qname,
+        READ_PAIRS:                  n_qname,
         READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
-        ALIGNMENTS: n_align,
+        ALIGNMENTS:                  n_align,
         ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
     })
 
@@ -261,8 +290,8 @@ def parse_cmdargs(args):
     parser.add_argument('--input-batch-size',
                         type=int,
                         help=('Specify the number of SAM records in each '
-                              'batch for the input queue. If not specified '
-                              'the heuristic 250/nconsumers is used.'))
+                              'batch for the input queue. If not specified, '
+                              'the heuristic 400/nconsumers is used.'))
     parser.add_argument('--mem-calc',
                         type=float,
                         nargs=2,
@@ -300,53 +329,55 @@ def pgline(last):
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
-def readends(alignments):
+def readends(qnamegrp):
     """
     Calculate ends of the fragment, accounting for soft-clipped bases.
 
     Args:
-        alignments: Qname group tuple of AlignedSegment instances.
+        qnamegrp: QNAME group of SAM records, each record supplied as a list
+            of str — i.e. the result of calling .split(TAB) on a SAM text line.
 
     Returns:
-        None if there are no aligned reads, otherwise a coordinate-sorted pair
-        of ends:
+        None if there are no aligned primary reads, otherwise a coord-sorted
+        pair of ends:
 
-            [(left_refid, left_pos, left_orientation),
-                (right_refid, right_pos, right_orientation)]
+            [(left_rname, left_ref_start, left_orientation),
+                (right_rname, right_ref_end, right_orientation)]
 
         a single unmapped end always appears last with the value UNMAPPED.
     """
-    r12 = [None, None]
     ends = [UNMAPPED, UNMAPPED]
-
-    # Pick the primary alignments.
-    for alignment in alignments:
-        if not (alignment.is_secondary or alignment.is_supplementary):
-            if alignment.is_read1:
-                r12[0] = alignment
-            elif alignment.is_read2:
-                r12[1] = alignment
-
-    # Bail if neither aligns.
-    if all(r.is_unmapped for r in r12):
-        return None
-
-    # Calculate the ends.
-    for i, r in enumerate(r12):
-        if r.is_unmapped:
+    idx = 0
+    for read in qnamegrp:
+        flag      = int(read[1])
+        rname     =     read[2]
+        ref_start = int(read[3])
+        cigar     =     read[5]
+        # use only the primary alignments for end calculation
+        if flag & FLAG_SECONDARY or flag & FLAG_SUPPLEMENTARY:
+            continue
+        # unmapped
+        if flag & FLAG_UNMAPPED:
             pass
-        elif r.is_forward:
+        # forward
+        elif not flag & FLAG_REVERSE:
             # Leading soft clips.
-            front_s = r.cigar[0][1] if r.cigar[0][0] == 4 else 0
-            ends[i] = r.reference_id, r.reference_start - front_s, 'F'
-        elif r.is_reverse:
-            # Trailing soft clips.
-            back_s = r.cigar[-1][1] if r.cigar[-1][0] == 4 else 0
-            ends[i] = r.reference_id, r.reference_end + back_s, 'R'
+            leading_s = int(match[1]) if (match := RE_LEADING_S(cigar)) else 0
+            ends[idx] = rname, ref_start - leading_s, 'F'
+        # reverse
+        else:
+            # Trailing soft clips
+            trailing_s = int(match[1]) if (match := RE_TRAILING_S(cigar)) else 0
+            ref_end = ref_start
+            for num, op in RE_CIGAR(cigar):
+                ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
+            ends[idx] = rname, ref_end + trailing_s, 'R'
+        idx += 1
+    assert idx == 2
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
-    return ends
+    return None if ends == [UNMAPPED, UNMAPPED] else ends
 
 
 def main():
@@ -361,7 +392,6 @@ def main():
     LOGGER.info(' '.join(sys.argv))
     nconsumers = args.consumer_processes
     inputbatchsize = args.input_batch_size
-    headerq = Queue(1)
     inq = Queue(20 * nconsumers)
     outq = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
@@ -370,16 +400,14 @@ def main():
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
         reader = Process(target=input_alnfile,
-                         args=(infd, outfd, headerq, inq, nconsumers,
-                               inputbatchsize))
+                         args=(infd, outfd, inq, nconsumers, inputbatchsize))
         reader.start()
-        header = headerq.get()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        consumers = [                                                       
-            Process(target=markdups, args=(bf.config, header, inq, outq, outfd))
-            for _ in range(nconsumers)                                      
-        ]                                                                   
-        list(map(lambda x: x.start(), consumers))    
+        consumers = [
+            Process(target=markdups, args=(bf.config, inq, outq, outfd))
+            for _ in range(nconsumers)
+        ]
+        list(map(lambda x: x.start(), consumers))
         list(map(lambda x: x.join(), consumers))
         reader.join()
         counts = [outq.get() for _ in range(nconsumers)]

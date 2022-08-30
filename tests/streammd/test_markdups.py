@@ -45,12 +45,11 @@ class TestMarkDups(TestCase):
         Confirm that ValueError is raised if SAM file input lacks header.
         """
         nconsumers = 1
-        headerq = Queue(1)
         inq = Queue(100)
         with (RESOURCES.joinpath('no_header.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_NOHEADER):
-                input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
+                input_alnfile(inf, out.fileno(), inq, nconsumers)
 
     def test_input_alnfile_qnamegrouped(self):
         """
@@ -58,26 +57,22 @@ class TestMarkDups(TestCase):
         grouped by qname.
         """
         nconsumers = 1
-        headerq = Queue(1)
         inq = Queue(100)
         with (RESOURCES.joinpath('not_qnamegrouped.sam') as inf,
                 NamedTemporaryFile() as out):
             with self.assertRaises(ValueError, msg=MSG_QNAMEGRP):
-                input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
+                input_alnfile(inf, out.fileno(), inq, nconsumers)
 
     def test_input_alnfile_batch_and_enqueue(self):
         """
-        Confirm that SAM file header is written headerq and SAM file records
-        are written to samq in batched groups as expected.
+        Confirm that SAM file records are written to inq in batched groups as
+        expected.
         """
         nconsumers = 2
-        headerq = Queue(1)
         inq = Queue(100)
         with (RESOURCES.joinpath('6_good_records.sam') as inf,
                 NamedTemporaryFile() as out):
-            input_alnfile(inf, out.fileno(), headerq, inq, nconsumers)
-        # Header is set.
-        self.assertTrue(headerq.qsize(), 1)
+            input_alnfile(inf, out.fileno(), inq, nconsumers)
         # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
         self.assertEqual(inq.qsize(), 1 + nconsumers)
         # 3 QNAME groups in the batch, each with one pair.
@@ -93,14 +88,16 @@ class TestMarkDups(TestCase):
         """
         sam = AlignmentFile(RESOURCES.joinpath('2_pairs_same_orientation.sam'))
         records = list(iter(sam))
-        pair_1 = (records[0], records[1])
-        pair_2 = (records[2], records[3])
+        pair_1, pair_2 = (records[0], records[1]), (records[2], records[3])
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
         self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
         self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_reverse)
-        ends_1 = readends(pair_1)
-        ends_2 = readends(pair_2)
+        pair_1s, pair_2s = [(r1.to_string().split('\t'),
+                             r2.to_string().split('\t'))
+                            for (r1, r2) in (pair_1, pair_2)]
+        ends_1 = readends(pair_1s)
+        ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
 
     def test_readends_2(self):
@@ -111,14 +108,16 @@ class TestMarkDups(TestCase):
         sam = AlignmentFile(RESOURCES.joinpath(
             '2_pairs_opposite_orientation.sam'))
         records = list(iter(sam))
-        pair_1 = (records[0], records[1])
-        pair_2 = (records[2], records[3])
+        pair_1, pair_2 = (records[0], records[1]), (records[2], records[3])
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_forward)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_reverse)
         self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_reverse)
         self.assertTrue(pair_2[1].is_read2 and pair_2[1].is_forward)
-        ends_1 = readends(pair_1)
-        ends_2 = readends(pair_2)
+        pair_1s, pair_2s = [(r1.to_string().split('\t'),
+                             r2.to_string().split('\t'))
+                            for (r1, r2) in (pair_1, pair_2)]
+        ends_1 = readends(pair_1s)
+        ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
 
     def test_readends_3(self):
@@ -128,8 +127,7 @@ class TestMarkDups(TestCase):
         """
         sam = AlignmentFile(RESOURCES.joinpath('2_pairs_soft_clipping.sam'))
         records = list(iter(sam))
-        pair_1 = (records[0], records[1])
-        pair_2 = (records[2], records[3])
+        pair_1, pair_2 = (records[0], records[1]), (records[2], records[3])
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_reverse)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_forward)
         self.assertTrue(pair_2[0].is_read1 and pair_2[0].is_forward)
@@ -140,8 +138,11 @@ class TestMarkDups(TestCase):
         self.assertNotEqual(pair_1[1].pos, pair_2[0].pos)
         self.assertNotEqual(pair_1[1].pos, pair_2[1].pos)
         # But accounting for soft clipping the template ends are the same.
-        ends_1 = readends(pair_1)
-        ends_2 = readends(pair_2)
+        pair_1s, pair_2s = [(r1.to_string().split('\t'),
+                             r2.to_string().split('\t'))
+                            for (r1, r2) in (pair_1, pair_2)]
+        ends_1 = readends(pair_1s)
+        ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
 
     def test_readends_4(self):
@@ -153,7 +154,8 @@ class TestMarkDups(TestCase):
         pair_1 = (records[0], records[1])
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_mapped)
-        ends_1 = readends(pair_1)
+        pair_1s = [r.to_string().split('\t') for r in pair_1]
+        ends_1 = readends(pair_1s)
         # Unmapped read end is sorted to last.
         self.assertEqual(ends_1[-1], UNMAPPED)
 
@@ -166,7 +168,11 @@ class TestMarkDups(TestCase):
         pair_1 = (records[0], records[1])
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_unmapped)
-        ends_1 = readends(pair_1)
+        pair_1s = [r.to_string().split('\t') for r in pair_1]
+        for r in pair_1s:
+            r[1] = int(r[1]) # FLAG
+            r[3] = int(r[3]) # POS
+        ends_1 = readends(pair_1s)
         # If both reads are unmapped readends returns None.
         self.assertIsNone(ends_1)
 
@@ -175,7 +181,6 @@ class TestMarkDups(TestCase):
         Confirm that duplicates are marked as expected.
         """
         nconsumers = 1
-        headerq = Queue(1)
         inq = Queue(100)
         outq = Queue(nconsumers)
         expected = [
@@ -185,10 +190,9 @@ class TestMarkDups(TestCase):
                 RESOURCES.joinpath('test.qname.sam') as inf,
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
-            input_alnfile(inf, outfd, headerq, inq, nconsumers)
-            header = headerq.get()
+            input_alnfile(inf, outfd, inq, nconsumers)
             bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
-            markdups(bf.config, header, inq, outq, outfd)
+            markdups(bf.config, inq, outq, outfd)
             counts = outq.get()
             self.assertEqual(counts[READ_PAIRS], 2027)
             self.assertEqual(counts[READ_PAIRS_MARKED_DUPLICATE], 1018)
@@ -298,7 +302,6 @@ class TestMarkDups(TestCase):
         output.
         """
         nconsumers = 1
-        headerq = Queue(1)
         inq = Queue(100)
         outq = Queue(nconsumers)
         expected = [
@@ -308,10 +311,9 @@ class TestMarkDups(TestCase):
                 RESOURCES.joinpath('test.unmapped.sam') as inf,
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
-            input_alnfile(inf, outfd, headerq, inq, nconsumers)
-            header = headerq.get()
+            input_alnfile(inf, outfd, inq, nconsumers)
             bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
-            markdups(bf.config, header, inq, outq, outfd)
+            markdups(bf.config, inq, outq, outfd)
             counts = outq.get()
             self.assertEqual(counts[READ_PAIRS], 1)
             self.assertEqual(counts[READ_PAIRS_MARKED_DUPLICATE], 0)
