@@ -49,13 +49,18 @@ MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
 MSG_VERSION = 'streammd version %s'
 
 CIGAR_CONSUMES_REF = {'M', 'D', 'N', '=', 'X'}
-# DEL sorts last in ascii
-DEL = b'\x7F'.decode('ascii')
+FLAG_UNMAPPED = 4
+FLAG_REVERSE = 16
+FLAG_SECONDARY = 256
+FLAG_DUPLICATE = 1024
+FLAG_SUPPLEMENTARY = 2048
 PGID = f'{__name__.partition(".")[0]}'
 RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))')
 RE_LEADING_S = re.compile(r'^(\d+)S')
 RE_TRAILING_S = re.compile(r'(\d+)S$')
 SENTINEL = 'STOP'
+# DEL sorts last in ascii
+DEL = b'\x7F'.decode('ascii')
 UNMAPPED = (DEL, -1, '')
 VERSION = metadata.version(PGID)
 
@@ -103,23 +108,22 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
                     headlines.append(pgline(headlines[-1]))
                     header_txt = ''.join(headlines)
                     os.write(outfd, header_txt.encode('ascii'))
-                record = line.strip()
-                qname = record.partition('\t')[0]
+                qname = line.partition('\t')[0]
                 if qname == groupid:
-                    group.append(record)
+                    group.append(line)
                 else:
                     if group:
                         if not len(group) > 1:
                             raise ValueError(MSG_QNAMEGRP % qname)
                         batch.append(group)
                         count += 1
-                        if not count % DEFAULT_LOGINTERVAL:
+                        if count % DEFAULT_LOGINTERVAL == 0:
                             LOGGER.debug(MSG_QSIZE, count, inq.qsize())
                         if len(batch) == batchsize:
                             inq.put(batch)
                             batch = []
                     groupid = qname
-                    group = [record]
+                    group = [line]
     batch.append(group)
     inq.put(batch)
     for _ in range(nconsumers):
@@ -156,31 +160,30 @@ def markdups(bfconfig, inq, outq, outfd):
         for group in batch:
             n_qname += 1
             n_align += len(group)
-            alignments = [r.split('\t') for r in group]
-            for a in alignments:
-                a[1] = int(a[1]) # FLAG
-                a[3] = int(a[3]) # POS
-            if (ends := readends(alignments)):
+            qnamegrp = [r.split('\t') for r in group]
+            if (ends := readends(qnamegrp)):
                 ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
                 if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
                     n_rp_dup += 1
-                    for a in alignments:
+                    for read in qnamegrp:
+                        flag = int(read[1])
                         # Replicate Picard MarkDuplicates behaviour: only the
                         # aligned read is marked as duplicate.
-                        if not a[1] & 4: # is mapped
+                        if not flag & FLAG_UNMAPPED:
+                            flag += FLAG_DUPLICATE
                             n_aln_dup += 1
-                            a[1] += 1024
+                        read[1] = str(flag)
                 elif not bf.add(''.join(ends_str)):
                     n_rp_dup += 1
-                    for a in alignments:
+                    for read in qnamegrp:
+                        read[1] = str(int(read[1]) + FLAG_DUPLICATE)
                         n_aln_dup += 1
-                        a[1] += 1024
-            for a in alignments:
-                outlines.append('\t'.join(map(str, a)))
+            for read in qnamegrp:
+                outlines.append('\t'.join(read))
         # Write the batch as a batch. In contrast to sys.stdout.write,
         # os.write is atomic so we don't have to care about locking or
         # using an output queue.
-        out = '\n'.join(outlines) + '\n'
+        out = ''.join(outlines)
         os.write(outfd, out.encode('ascii'))
     outq.put({
         READ_PAIRS: n_qname,
@@ -300,55 +303,41 @@ def pgline(last):
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
-def readends(alignments):
+def readends(qnamegrp):
     """
     Calculate ends of the fragment, accounting for soft-clipped bases.
 
     Args:
-        alignments: QNAME group tuple of SAM record strings.
+        qnamegrp: QNAME group of SAM records, each record supplied as a list
+            of str — i.e. the result of calling .split(TAB) on a SAM text line.
 
     Returns:
-        None if there are no aligned reads, otherwise a coordinate-sorted pair
-        of ends:
+        None if there are no aligned primary reads, otherwise a coord-sorted
+        pair of ends:
 
-            [(left_refid, left_pos, left_orientation),
-                (right_refid, right_pos, right_orientation)]
+            [(left_rname, left_refstart, left_orientation),
+                (right_rname, right_refend, right_orientation)]
 
         a single unmapped end always appears last with the value UNMAPPED.
     """
-    r12 = [None, None]
-    ends = [UNMAPPED, UNMAPPED]
-
-    # Pick the primary alignments.
-    for a in alignments:
-        # not secondary or supplementary
-        if not (a[1] & 256 or a[1] & 2048):
-            # first
-            if a[1] & 64:
-                r12[0] = a
-            # second
-            elif a[1] & 128:
-                r12[1] = a
-
-    # Bail if neither aligns.
-    if all(r[1] & 4 for r in r12):
-        return None
-
-    # Calculate the ends.
-    for i, r in enumerate(r12):
-        flag            = r[1]
-        rname           = r[2]
-        pos = ref_start = r[3]
-        cigar           = r[5]
-        # unmapped
-        if flag & 4:
+    ends = []
+    for read in qnamegrp:
+        flag      = int(read[1])
+        rname     =     read[2]
+        ref_start = int(read[3])
+        cigar     =     read[5]
+        # use only the primary alignments for end calculation
+        if flag & FLAG_SECONDARY or flag & FLAG_SUPPLEMENTARY:
             continue
+        # unmapped
+        if flag & FLAG_UNMAPPED:
+            ends.append(UNMAPPED)
         # forward
-        if not flag & 16:
+        elif not flag & FLAG_REVERSE:
             # Leading soft clips.
             match = RE_LEADING_S.search(cigar)
             leading_s = int(match.group(1)) if match else 0
-            ends[i] = rname, ref_start - leading_s, 'F'
+            ends.append((rname, ref_start - leading_s, 'F'))
         # reverse
         else:
             # Trailing soft clips
@@ -357,11 +346,12 @@ def readends(alignments):
             ref_end = ref_start
             for num, op in RE_CIGAR.findall(cigar):
                 ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
-            ends[i] = rname, ref_end + trailing_s, 'R'
+            ends.append((rname, ref_end + trailing_s, 'R'))
+    assert len(ends) == 2
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
-    return ends
+    return None if ends == [UNMAPPED, UNMAPPED] else ends
 
 
 def main():

@@ -96,10 +96,6 @@ class TestMarkDups(TestCase):
         pair_1s, pair_2s = [(r1.to_string().split('\t'),
                              r2.to_string().split('\t'))
                             for (r1, r2) in (pair_1, pair_2)]
-        for pair in (pair_1s, pair_2s):
-            for r in pair:
-                r[1] = int(r[1]) # FLAG
-                r[3] = int(r[3]) # POS
         ends_1 = readends(pair_1s)
         ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
@@ -120,10 +116,6 @@ class TestMarkDups(TestCase):
         pair_1s, pair_2s = [(r1.to_string().split('\t'),
                              r2.to_string().split('\t'))
                             for (r1, r2) in (pair_1, pair_2)]
-        for pair in (pair_1s, pair_2s):
-            for r in pair:
-                r[1] = int(r[1]) # FLAG
-                r[3] = int(r[3]) # POS
         ends_1 = readends(pair_1s)
         ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
@@ -149,10 +141,6 @@ class TestMarkDups(TestCase):
         pair_1s, pair_2s = [(r1.to_string().split('\t'),
                              r2.to_string().split('\t'))
                             for (r1, r2) in (pair_1, pair_2)]
-        for pair in (pair_1s, pair_2s):
-            for r in pair:
-                r[1] = int(r[1]) # FLAG
-                r[3] = int(r[3]) # POS
         ends_1 = readends(pair_1s)
         ends_2 = readends(pair_2s)
         self.assertEqual(ends_1, ends_2)
@@ -167,9 +155,6 @@ class TestMarkDups(TestCase):
         self.assertTrue(pair_1[0].is_read1 and pair_1[0].is_unmapped)
         self.assertTrue(pair_1[1].is_read2 and pair_1[1].is_mapped)
         pair_1s = [r.to_string().split('\t') for r in pair_1]
-        for r in pair_1s:
-            r[1] = int(r[1]) # FLAG
-            r[3] = int(r[3]) # POS
         ends_1 = readends(pair_1s)
         # Unmapped read end is sorted to last.
         self.assertEqual(ends_1[-1], UNMAPPED)
