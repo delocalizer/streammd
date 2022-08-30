@@ -55,9 +55,11 @@ FLAG_SECONDARY = 256
 FLAG_DUPLICATE = 1024
 FLAG_SUPPLEMENTARY = 2048
 PGID = f'{__name__.partition(".")[0]}'
-RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))')
-RE_LEADING_S = re.compile(r'^(\d+)S')
-RE_TRAILING_S = re.compile(r'(\d+)S$')
+PGTAG = 'PG:Z'
+RE_CIGAR = re.compile(r'(?:(\d+)([MIDNSHPX=]))').findall
+RE_LEADING_S = re.compile(r'^(\d+)S').search
+RE_TRAILING_S = re.compile(r'(\d+)S$').search
+SAM_OPTS_IDX = 11
 SENTINEL = 'STOP'
 # DEL sorts last in ascii
 DEL = b'\x7F'.decode('ascii')
@@ -130,6 +132,35 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
         inq.put(SENTINEL)
 
 
+def markdup(record):
+    """
+    Mark the record as duplicate by updating in-place the FLAG, adding or
+    updating the PG:Z: tag, and returning 1.
+
+    If the record is unmapped, no update is done and 0 is returned.
+
+    Args:
+        record: list of SAM record str tokens.
+
+    Retuns:
+        number of duplicates marked: 1 if updated or 0 if not (unmapped read).
+    """
+    flag = int(record[1])
+    # Replicate Picard MarkDuplicates behaviour: only an aligned read is
+    # marked as duplicate.
+    if flag & FLAG_UNMAPPED:
+        return 0
+    record[1] = str(flag + FLAG_DUPLICATE)
+    pg_old, pg_new = None, f'{PGTAG}:{PGID}'
+    for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
+        if opt.startswith(PGTAG):
+            pg_old = opt
+            record[i] = pg_new
+    if not pg_old:
+        record.append(pg_new)
+    return 1
+
+
 def markdups(bfconfig, inq, outq, outfd):
     """
     Process SAM file records.
@@ -160,35 +191,29 @@ def markdups(bfconfig, inq, outq, outfd):
         for group in batch:
             n_qname += 1
             n_align += len(group)
-            qnamegrp = [r.split('\t') for r in group]
+            qnamegrp = [r.strip().split('\t') for r in group]
             if (ends := readends(qnamegrp)):
                 ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
-                if ends[1] == UNMAPPED and not bf.add(ends_str[0]):
+                if (
+                        # one end mapped and is dupe
+                        (ends[1] == UNMAPPED and not bf.add(ends_str[0])) or
+                        # both ends mapped and frag is dupe
+                        not bf.add(''.join(ends_str))
+                ):
                     n_rp_dup += 1
                     for read in qnamegrp:
-                        flag = int(read[1])
-                        # Replicate Picard MarkDuplicates behaviour: only the
-                        # aligned read is marked as duplicate.
-                        if not flag & FLAG_UNMAPPED:
-                            flag += FLAG_DUPLICATE
-                            n_aln_dup += 1
-                        read[1] = str(flag)
-                elif not bf.add(''.join(ends_str)):
-                    n_rp_dup += 1
-                    for read in qnamegrp:
-                        read[1] = str(int(read[1]) + FLAG_DUPLICATE)
-                        n_aln_dup += 1
+                        n_aln_dup += markdup(read)
             for read in qnamegrp:
                 outlines.append('\t'.join(read))
         # Write the batch as a batch. In contrast to sys.stdout.write,
         # os.write is atomic so we don't have to care about locking or
         # using an output queue.
-        out = ''.join(outlines)
+        out = '\n'.join(outlines) + '\n'
         os.write(outfd, out.encode('ascii'))
     outq.put({
-        READ_PAIRS: n_qname,
+        READ_PAIRS:                  n_qname,
         READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
-        ALIGNMENTS: n_align,
+        ALIGNMENTS:                  n_align,
         ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
     })
 
@@ -315,8 +340,8 @@ def readends(qnamegrp):
         None if there are no aligned primary reads, otherwise a coord-sorted
         pair of ends:
 
-            [(left_rname, left_refstart, left_orientation),
-                (right_rname, right_refend, right_orientation)]
+            [(left_rname, left_ref_start, left_orientation),
+                (right_rname, right_ref_end, right_orientation)]
 
         a single unmapped end always appears last with the value UNMAPPED.
     """
@@ -335,16 +360,14 @@ def readends(qnamegrp):
         # forward
         elif not flag & FLAG_REVERSE:
             # Leading soft clips.
-            match = RE_LEADING_S.search(cigar)
-            leading_s = int(match.group(1)) if match else 0
+            leading_s = int(match[1]) if (match := RE_LEADING_S(cigar)) else 0
             ends.append((rname, ref_start - leading_s, 'F'))
         # reverse
         else:
             # Trailing soft clips
-            match = RE_TRAILING_S.search(cigar)
-            trailing_s = int(match.group(1)) if match else 0
+            trailing_s = int(match[1]) if (match := RE_TRAILING_S(cigar)) else 0
             ref_end = ref_start
-            for num, op in RE_CIGAR.findall(cigar):
+            for num, op in RE_CIGAR(cigar):
                 ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
             ends.append((rname, ref_end + trailing_s, 'R'))
     assert len(ends) == 2
