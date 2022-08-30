@@ -91,42 +91,43 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
     Returns:
         None
     """
-    count = 0
+    n_qname = 0
     batch = []
-    group = []
-    groupid = None
-    header_txt = None
+    qname_group = []
+    qname_last = None
+    header_done = None
     headlines = []
     batchsize = batchsize or ceil(400/nconsumers)
     LOGGER.info(MSG_BATCHSIZE, batchsize)
     with open(infd) as infh:
         for line in infh:
-            if line.startswith('@'):
+            if header_done:
+                qname = line.partition('\t')[0]
+                if qname == qname_last:
+                    qname_group.append(line)
+                else:
+                    if len(qname_group) < 2:
+                        raise ValueError(MSG_QNAMEGRP % qname)
+                    n_qname += 1
+                    if n_qname % DEFAULT_LOGINTERVAL == 0:
+                        LOGGER.debug(MSG_QSIZE, n_qname, inq.qsize())
+                    batch.append(qname_group)
+                    if len(batch) == batchsize:
+                        inq.put(batch)
+                        batch = []
+                    qname_last = qname
+                    qname_group = [line]
+            elif line.startswith('@'):
                 headlines.append(line)
             else:
-                if not header_txt:
-                    if not headlines:
-                        raise ValueError(MSG_NOHEADER)
-                    headlines.append(pgline(headlines[-1]))
-                    header_txt = ''.join(headlines)
-                    os.write(outfd, header_txt.encode('ascii'))
-                qname = line.partition('\t')[0]
-                if qname == groupid:
-                    group.append(line)
-                else:
-                    if group:
-                        if not len(group) > 1:
-                            raise ValueError(MSG_QNAMEGRP % qname)
-                        batch.append(group)
-                        count += 1
-                        if count % DEFAULT_LOGINTERVAL == 0:
-                            LOGGER.debug(MSG_QSIZE, count, inq.qsize())
-                        if len(batch) == batchsize:
-                            inq.put(batch)
-                            batch = []
-                    groupid = qname
-                    group = [line]
-    batch.append(group)
+                if not headlines:
+                    raise ValueError(MSG_NOHEADER)
+                headlines.append(pgline(headlines[-1]))
+                header_done = ''.join(headlines)
+                os.write(outfd, header_done.encode('ascii'))
+                qname_last = line.partition('\t')[0]
+                qname_group = [line]
+    batch.append(qname_group)
     inq.put(batch)
     for _ in range(nconsumers):
         inq.put(SENTINEL)
@@ -345,7 +346,8 @@ def readends(qnamegrp):
 
         a single unmapped end always appears last with the value UNMAPPED.
     """
-    ends = []
+    ends = [UNMAPPED, UNMAPPED]
+    idx = 0
     for read in qnamegrp:
         flag      = int(read[1])
         rname     =     read[2]
@@ -356,12 +358,12 @@ def readends(qnamegrp):
             continue
         # unmapped
         if flag & FLAG_UNMAPPED:
-            ends.append(UNMAPPED)
+            pass
         # forward
         elif not flag & FLAG_REVERSE:
             # Leading soft clips.
             leading_s = int(match[1]) if (match := RE_LEADING_S(cigar)) else 0
-            ends.append((rname, ref_start - leading_s, 'F'))
+            ends[idx] = rname, ref_start - leading_s, 'F'
         # reverse
         else:
             # Trailing soft clips
@@ -369,8 +371,9 @@ def readends(qnamegrp):
             ref_end = ref_start
             for num, op in RE_CIGAR(cigar):
                 ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
-            ends.append((rname, ref_end + trailing_s, 'R'))
-    assert len(ends) == 2
+            ends[idx] = rname, ref_end + trailing_s, 'R'
+        idx += 1
+    assert idx == 2
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
