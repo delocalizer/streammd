@@ -7,7 +7,6 @@ from importlib.resources import files
 from tempfile import NamedTemporaryFile
 from unittest import TestCase
 from unittest.mock import patch
-import contextlib
 import io
 import json
 import sys
@@ -16,7 +15,6 @@ from pysam import AlignmentFile
 
 from streammd.bloomfilter import BloomFilter
 from streammd.markdups import (DEFAULT_FPRATE,
-                               DEFAULT_NITEMS,
                                MSG_NOHEADER,
                                MSG_NOTSINGLE,
                                MSG_NOTPAIRED,
@@ -201,7 +199,7 @@ class TestMarkDups(TestCase):
 
     def test_readends_6(self):
         """
-        Confirm that one end unmapped is handled as expected.
+        Confirm that pair with one end unmapped is handled as expected.
         """
         sam = AlignmentFile(RESOURCES.joinpath('1_pair_one_unmapped_end.sam'))
         records = list(iter(sam))
@@ -210,12 +208,12 @@ class TestMarkDups(TestCase):
         self.assertTrue(pair[1].is_read2 and pair[1].is_mapped)
         pair_s = [r.to_string().split('\t') for r in pair]
         ends = readends(pair_s)
-        # Unmapped read end is sorted to last.
+        # Unmapped read was first but unmapped end is sorted to last.
         self.assertEqual(ends[-1], UNMAPPED)
 
     def test_readends_7(self):
         """
-        Confirm that both ends unmapped is handled as expected.
+        Confirm that pair with both ends unmapped is handled as expected.
         """
         sam = AlignmentFile(RESOURCES.joinpath('1_pair_two_unmapped_ends.sam'))
         records = list(iter(sam))
@@ -224,7 +222,6 @@ class TestMarkDups(TestCase):
         self.assertTrue(pair[1].is_read2 and pair[1].is_unmapped)
         pair_s = [r.to_string().split('\t') for r in pair]
         ends = readends(pair_s)
-        # If both reads are unmapped readends returns None.
         self.assertEqual(ends, [UNMAPPED, UNMAPPED])
 
     def test_markdups_notpaired(self):
@@ -240,7 +237,7 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
             input_alnfile(inf, outfd, inq, nconsumers)
-            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             with self.assertRaises(ValueError, msg=MSG_NOTPAIRED):
                 markdups(bf.config, inq, outq, outfd, 2)
 
@@ -257,7 +254,7 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
             input_alnfile(inf, outfd, inq, nconsumers)
-            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             with self.assertRaises(ValueError, msg=MSG_NOTSINGLE):
                 markdups(bf.config, inq, outq, outfd, 1)
 
@@ -276,7 +273,7 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
             input_alnfile(inf, outfd, inq, nconsumers)
-            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             markdups(bf.config, inq, outq, outfd, 1)
             counts = outq.get()
             self.assertEqual(counts['TEMPLATES'], 4)
@@ -303,7 +300,7 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
             input_alnfile(inf, outfd, inq, nconsumers)
-            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            bf = BloomFilter(smm, 4000, DEFAULT_FPRATE)
             markdups(bf.config, inq, outq, outfd, 2)
             counts = outq.get()
             self.assertEqual(counts['TEMPLATES'], 2027)
@@ -317,8 +314,8 @@ class TestMarkDups(TestCase):
 
     def test_markdups_5(self):
         """
-        Confirm that paired records with both read and mate unmapped appear in
-        the output.
+        Confirm that paired records with both read and mate unmapped still
+        appear in the output.
         """
         nconsumers = 1
         inq = Queue(100)
@@ -331,7 +328,7 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out):
             outfd=out.fileno()
             input_alnfile(inf, outfd, inq, nconsumers)
-            bf = BloomFilter(smm, DEFAULT_NITEMS, DEFAULT_FPRATE)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             markdups(bf.config, inq, outq, outfd, 2)
             counts = outq.get()
             self.assertEqual(counts['TEMPLATES'], 1)
@@ -342,6 +339,46 @@ class TestMarkDups(TestCase):
                 (alignment.qname, alignment.flag) for alignment in
                 AlignmentFile(out.name)]
             self.assertEqual(result, expected)
+
+    def test_markdups_6(self):
+        """
+        Confirm that when strip_previous is False (default) that previously
+        marked duplicate flag remains on read no longer considered duplicate.
+        """
+        nconsumers = 1
+        inq = Queue(100)
+        outq = Queue(nconsumers)
+        with (SharedMemoryManager() as smm,
+                RESOURCES.joinpath('test.previousdup.sam') as inf,
+                NamedTemporaryFile() as out):
+            outfd=out.fileno()
+            input_alnfile(inf, outfd, inq, nconsumers)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
+            markdups(bf.config, inq, outq, outfd, 1)
+            result = [(alignment.flag, alignment.get_tag('PG'))
+                      for alignment in AlignmentFile(out.name)]
+            self.assertEqual(result[0], (1024, 'MarkDuplicates'))  # previous
+            self.assertEqual(result[1], (1024, PGID))              # new
+
+    def test_markdups_7(self):
+        """
+        Confirm that when strip_previous is True that previously marked
+        duplicate flag is removed on read no longer considered duplicate.
+        """
+        nconsumers = 1
+        inq = Queue(100)
+        outq = Queue(nconsumers)
+        with (SharedMemoryManager() as smm,
+                RESOURCES.joinpath('test.previousdup.sam') as inf,
+                NamedTemporaryFile() as out):
+            outfd=out.fileno()
+            input_alnfile(inf, outfd, inq, nconsumers)
+            bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
+            markdups(bf.config, inq, outq, outfd, 1, True)
+            result = [(alignment.flag, alignment.get_tag('PG'))
+                      for alignment in AlignmentFile(out.name)]
+            self.assertEqual(result[0], (0, PGID))     # updated
+            self.assertEqual(result[1], (1024, PGID))  # new
 
     def test_main_markdups_1(self):
         """
@@ -355,7 +392,7 @@ class TestMarkDups(TestCase):
             testargs = list(
                 map(str, ('streammd', '--paired', '--consumer-processes', 1,
                           '--input', inf, '--output', out.name, '--metrics',
-                          '/dev/null')))
+                          '/dev/null', '-n', 1000000)))
             with patch.object(sys, 'argv', testargs):
                 main()
             result = [
@@ -380,7 +417,7 @@ class TestMarkDups(TestCase):
             testargs = list(
                 map(str, ('streammd', '--paired', '--consumer-processes', 1,
                           '--input', inf, '--output', out.name, '--metrics',
-                          met.name)))
+                          met.name, '-n', 1000000)))
             outstr = io.StringIO()
             with (patch.object(sys, 'argv', testargs),
                     self.assertLogs('streammd.markdups', level='INFO') as log):

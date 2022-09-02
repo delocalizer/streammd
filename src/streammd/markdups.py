@@ -11,7 +11,7 @@ from importlib import metadata
 from math import ceil
 from multiprocessing import Process, Queue
 from multiprocessing.managers import SharedMemoryManager
-from typing import List, Optional, TextIO, Tuple, TypedDict
+from typing import List, Literal, Optional, TextIO, Tuple, TypedDict
 import argparse
 import json
 import logging
@@ -182,7 +182,8 @@ def markdups(bfconfig: BloomFilterConfig,
              inq: Queue,
              outq: Queue,
              outfd: int,
-             reads_per_template: int) -> None:
+             reads_per_template: Literal[1, 2],
+             strip_previous: bool=False) -> None:
     """
     Process SAM file records.
 
@@ -193,6 +194,11 @@ def markdups(bfconfig: BloomFilterConfig,
         outq: multiprocessing.Queue to put results.
         outfd: output stream file descriptor.
         reads_per_template: 1 or 2.
+        strip_previous: unset duplicate flag bit for any reads that have it
+            set and are no longer considered duplicate (default=False). Not
+            necessary unless records have previously been through a duplicate
+            marking step, in which case it is strongly recommended for
+            sensible results.
 
     Results are added to the queue as a Metrics instance:
 
@@ -228,6 +234,9 @@ def markdups(bfconfig: BloomFilterConfig,
                 n_tpl_dup += 1
                 for read in qnamegrp:
                     n_aln_dup += markdup(read)
+            elif strip_previous:
+                for read in qnamegrp:
+                    unmarkdup(read)
             for read in qnamegrp:
                 outlines.append('\t'.join(read))
         # Write the batch as a batch. In contrast to sys.stdout.write,
@@ -324,6 +333,14 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         help=('Specify the number of SAM records in each '
                               'batch for the input queue. If not specified, '
                               'the heuristic 400/nconsumers is used.'))
+    parser.add_argument('--strip-previous',
+                        action='store_true',
+                        help=('Unset duplicate flag bit for any reads that '
+                              'have it set and are no longer considered '
+                              'duplicate (default=False). Not required unless '
+                              'records have previously been through a '
+                              'duplicate marking step, in which case it is '
+                              'strongly recommended for sensible results.'))
     parser.add_argument('--version',
                         action='version',
                         version=VERSION)
@@ -412,6 +429,28 @@ def readends(qnamegrp: List[List[str]]) -> List[Tuple[str, int, str]]:
     return ends
 
 
+def unmarkdup(record: List[str]) -> None:
+    """
+    If the record is currently marked as a duplicate, update it in place to
+    remove the duplicate flag and add or update the PG:Z: tag. This handles
+    the case where a record was marked duplicate by an earlier PG but is not
+    considered as duplicate by streammd.
+
+    Args:
+        record: list of SAM record str tokens.
+    """
+    flag = int(record[1])
+    if flag | FLAG_DUPLICATE:
+        record[1] = str(flag ^ FLAG_DUPLICATE)
+        pg_old, pg_new = None, f'{PGTAG}:{PGID}'
+        for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
+            if opt.startswith(PGTAG):
+                pg_old = opt
+                record[i] = pg_new
+        if not pg_old:
+            record.append(pg_new)
+
+
 def main() -> None:
     """
     Run as CLI script.
@@ -420,7 +459,6 @@ def main() -> None:
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
     nconsumers = args.consumer_processes
-    inputbatchsize = args.input_batch_size
     reads = args.reads_per_template
     inq: 'Queue[str]' = Queue(20 * nconsumers)
     outq: 'Queue[Metrics]' = Queue(nconsumers)
@@ -429,12 +467,14 @@ def main() -> None:
           open(args.output, 'w') as outfh,
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
-        reader = Process(target=input_alnfile,
-                         args=(infd, outfd, inq, nconsumers, inputbatchsize))
+        reader_args = (infd, outfd, inq, nconsumers, args.input_batch_size)
+        reader = Process(target=input_alnfile, args=reader_args)
         reader.start()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
+        markdups_args = (bf.config, inq, outq, outfd, args.reads_per_template,
+                         args.strip_previous)
         consumers = [
-            Process(target=markdups, args=(bf.config, inq, outq, outfd, reads))
+            Process(target=markdups, args=markdups_args)
             for _ in range(nconsumers)
         ]
         list(map(lambda x: x.start(), consumers))
