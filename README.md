@@ -83,7 +83,8 @@ maximum false positive rate `p`:
 
 
 As a guide, 60x human WGS 2x150bp paired-end sequencing consists of
-n &#8776; 6.00E+08 templates.
+n &#8776; 6.00E+08 templates. Run the included `memcalc` tool to get an
+estimate of `streammd` memory use for a given `n` and `p`.
 
 ### Handling outputs
 
