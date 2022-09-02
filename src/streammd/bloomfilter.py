@@ -2,10 +2,12 @@
 A Bloom filter implementation.
 """
 import logging
+from dataclasses import dataclass
 from math import ceil, log
 from multiprocessing.shared_memory import SharedMemory
+from multiprocessing.managers import SharedMemoryManager
 from sys import getsizeof
-from typing import Union 
+from typing import Callable, List, Optional, Tuple, TypedDict
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
 from farmhash import hash64withseed
@@ -25,14 +27,29 @@ MSG_INIT = 'BloomFilter initialized with n=%s, p=%s'
 MSG_NADDED_GT_N = 'approx number of added items %s now exceeds target: %s'
 
 
+@dataclass
+class BloomFilterConfig:
+    """
+    Configuration for a BloomFilter.
+    """
+    shm_bits: str
+    n: int
+    p: float
+    m: int
+    k: int
+
+
 class BloomFilter:
     """
     A Bloom filter implementation.
     """
-    default_n = int(1e9)
-    default_p = 1e-9
+    default_n: int = int(1e9)
+    default_p: float = 1e-9
 
-    def __init__(self, smm, n=default_n, p=default_p):
+    def __init__(self,
+                 smm: SharedMemoryManager,
+                 n: int=default_n,
+                 p: float=default_p) -> None:
         """
         Args:
             smm: SharedMemoryManager instance.
@@ -44,13 +61,13 @@ class BloomFilter:
         self.hash = self.hasher(self.m, self.k)
 
         # set up memory
-        self.shm_bits = smm.SharedMemory(getsizeof(bitarray(self.m)))
+        self.shm_bits = smm.SharedMemory( getsizeof(bitarray(self.m)))
 
         # initialize
         self.bits = bitarray(buffer=self.shm_bits.buf)
         self.bits[:] = 0
 
-    def __contains__(self, item: Union[str, bytes]):
+    def __contains__(self, item: bytes|str) -> bool:
         """
         Test if an item is present.
 
@@ -64,13 +81,13 @@ class BloomFilter:
                 return False
         return True
 
-    def __del__(self):
+    def __del__(self) -> None:
         """
         Cleanup on aisle 3.
         """
         del self.bits
 
-    def add(self, item: Union[str, bytes]):
+    def add(self, item: bytes|str) -> bool:
         """
         Add an item.
 
@@ -90,7 +107,7 @@ class BloomFilter:
         1. Much more time is spent in the hash and modulus functions than in
            getting/setting bits.
         2. Fewer threads = less of an issue.
-        3. Randomly and infrequently distributed duplicates in the inputs = 
+        3. Randomly and infrequently distributed duplicates in the inputs =
            less of an issue.
         If in doubt tests should be run with real data to check if the
         behaviour of this implementation is acceptable. My testing showed that
@@ -104,16 +121,14 @@ class BloomFilter:
         return added
 
     @property
-    def config(self):
-        return {
-            'shm_bits': self.shm_bits.name,
-            'n': self.n,
-            'p': self.p,
-            'm': self.m,
-            'k': self.k
-        }
+    def config(self) -> BloomFilterConfig:
+        """
+        Returns configuration for this instance.
+        """
+        return BloomFilterConfig(
+                self.shm_bits.name, self.n, self.p, self.m, self.k)
 
-    def count(self):
+    def count(self) -> int:
         """
         Return the approximate number of items stored.
 
@@ -126,7 +141,7 @@ class BloomFilter:
         return ceil((-self.m/self.k) * log(1 - (self.bits.count(1)/self.m)))
 
     @classmethod
-    def copy(cls, config):
+    def copy(cls, config: BloomFilterConfig) -> 'BloomFilter':
         """
         Copy state from another BloomFilter instance, referencing the same
         shared memory.
@@ -138,17 +153,21 @@ class BloomFilter:
             BloomFilter
         """
         instance = object.__new__(cls)
-        instance.shm_bits = SharedMemory(name=config['shm_bits'])
-        instance.n = config['n']
-        instance.p = config['p']
-        instance.m = config['m']
-        instance.k = config['k']
+        instance.shm_bits = SharedMemory(name=config.shm_bits)
+        instance.n = config.n
+        instance.p = config.p
+        instance.m = config.m
+        instance.k = config.k
         instance.hash = instance.hasher(instance.m, instance.k)
         instance.bits = bitarray(buffer=instance.shm_bits.buf)
         return instance
 
     @classmethod
-    def hasher(cls, m, k, seeds=None):
+    def hasher(cls,
+               m: int,
+               k: int,
+               seeds: Optional[List[int]]=None
+               ) -> Callable[[bytes|str], List[int]]:
         """
         Return a function that hashes to k independent integer outputs of
         size m.
@@ -166,7 +185,7 @@ class BloomFilter:
         return _hasher
 
     @classmethod
-    def optimal_m_k(cls, n, p):
+    def optimal_m_k(cls, n: int, p: float) -> Tuple[int, int]:
         """
         Return the optimal number of bits m and optimal number of hash
         functions k for a Bloom filter containing n items with a false

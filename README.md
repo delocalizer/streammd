@@ -9,10 +9,11 @@ at the end of processing.
 
 ### Features
 
-* Very fast — with default settings `streammd` is typically &#8776; 3x faster
-  than Picard MarkDuplicates.
-* Low memory use, even for large libraries — with default settings `streammd`
-  requires less than 4GB to process 1B read pairs.
+* Very fast — with default settings (2 hashing processes) `streammd` is
+  typically &#8776; 3x faster than Picard MarkDuplicates; even faster is easily
+  achievable using more hashers.
+* Low memory use, even for large libraries — with default settings (_p_=10<sup>-6</sup>)
+  `streammd` requires less than 4GB to process 1B templates.
 * High concordance with Picard MarkDuplicates metrics.
 * Soft-clipped reads are correctly handled.
 * Tunable target false positive rate.
@@ -31,7 +32,6 @@ Inherent, due to the nature of the single-pass operation:
 Implementation specific:
 
 * Output is not deterministic when using more than 1 consumer process.
-* Currently only paired reads are supported.
 
 ## Install
 
