@@ -11,13 +11,14 @@ from importlib import metadata
 from math import ceil
 from multiprocessing import Process, Queue
 from multiprocessing.managers import SharedMemoryManager
+from typing import List, Literal, Optional, TextIO, Tuple, TypedDict
 import argparse
 import json
 import logging
 import os
 import re
 import sys
-from .bloomfilter import BloomFilter
+from .bloomfilter import BloomFilter, BloomFilterConfig
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -29,22 +30,18 @@ DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
 DEFAULT_NWORKERS = 4
 
-ALIGNMENTS = 'ALIGNMENTS'
-ALIGNMENTS_MARKED_DUPLICATE = 'ALIGNMENTS_MARKED_DUPLICATE'
-READ_PAIRS = 'READ_PAIRS'
-READ_PAIRS_MARKED_DUPLICATE = 'READ_PAIRS_MARKED_DUPLICATE'
-READ_PAIR_DUPLICATE_FRACTION = 'READ_PAIR_DUPLICATE_FRACTION'
-UNIQUE_ITEMS_APPROXIMATE = 'UNIQUE_ITEMS_APPROXIMATE'
-
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
 MSG_BATCHSIZE = 'running with batchsize=%s'
 MSG_NOHEADER = 'no header lines detected'
-MSG_QNAMEGRP = 'singleton %s: input is not paired reads or not qname grouped'
+MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
+                 'single-end reads?')
+MSG_NOTPAIRED = ('%s: expected 2 primary alignments, got %s. Input is not '
+                 'paired-end reads or not qname grouped?')
 MSG_QSIZE = 'after %s qnames seen, approx input queue size is %s'
-MSG_READ_PAIRS = 'read pairs seen: %s'
-MSG_READ_PAIRS_MARKED_DUPLICATE = 'read pairs marked duplicate: %s'
-MSG_READ_PAIR_DUPLICATE_FRACTION = 'read pair duplicate fraction: %0.4f'
+MSG_TEMPLATES = 'templates seen: %s'
+MSG_TEMPLATES_MARKED_DUPLICATE = 'templates marked duplicate: %s'
+MSG_TEMPLATE_DUPLICATE_FRACTION = 'template duplicate fraction: %0.4f'
 MSG_UNIQUE_ITEMS_APPROXIMATE = 'approximate number of unique items: %s'
 MSG_VERSION = 'streammd version %s'
 
@@ -63,11 +60,26 @@ SAM_OPTS_IDX = 11
 SENTINEL = 'STOP'
 # DEL sorts last in ascii
 DEL = b'\x7F'.decode('ascii')
-UNMAPPED = (DEL, -1, '')
+UNMAPPED = (DEL, 0, '')
 VERSION = metadata.version(PGID)
 
 
-def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
+class Metrics(TypedDict, total=False):
+    """
+    Metrics from duplicate marking processes.
+    """
+    ALIGNMENTS: int
+    ALIGNMENTS_MARKED_DUPLICATE: int
+    TEMPLATES: int
+    TEMPLATES_MARKED_DUPLICATE: int
+    TEMPLATE_DUPLICATE_FRACTION: float
+
+
+def input_alnfile(infd: int|str,
+                  outfd: int,
+                  inq: Queue,
+                  nconsumers: int,
+                  batchsize:Optional[int]=None) -> None:
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     in batches.
@@ -91,8 +103,12 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
     Returns:
         None
     """
+    # the single producer process is the bottleneck so we have some fussy
+    # optimizations in here at the cost of readability — e.g. increment
+    # batch_sz rather than calling len(batch).
     n_qname = 0
     batch = []
+    batch_sz = 0
     qname_group = []
     qname_last = None
     header_done = None
@@ -106,15 +122,15 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
                 if qname == qname_last:
                     qname_group.append(line)
                 else:
-                    if len(qname_group) < 2:
-                        raise ValueError(MSG_QNAMEGRP % qname)
                     n_qname += 1
                     if n_qname % DEFAULT_LOGINTERVAL == 0:
                         LOGGER.debug(MSG_QSIZE, n_qname, inq.qsize())
                     batch.append(qname_group)
-                    if len(batch) == batchsize:
+                    batch_sz += 1
+                    if batch_sz == batchsize:
                         inq.put(batch)
                         batch = []
+                        batch_sz = 0
                     qname_last = qname
                     qname_group = [line]
             elif line.startswith('@'):
@@ -133,7 +149,7 @@ def input_alnfile(infd, outfd, inq, nconsumers, batchsize=None):
         inq.put(SENTINEL)
 
 
-def markdup(record):
+def markdup(record: List[str]) -> int:
     """
     Mark the record as duplicate by updating in-place the FLAG, adding or
     updating the PG:Z: tag, and returning 1.
@@ -151,7 +167,7 @@ def markdup(record):
     # marked as duplicate.
     if flag & FLAG_UNMAPPED:
         return 0
-    record[1] = str(flag + FLAG_DUPLICATE)
+    record[1] = str(flag | FLAG_DUPLICATE)
     pg_old, pg_new = None, f'{PGTAG}:{PGID}'
     for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
         if opt.startswith(PGTAG):
@@ -162,7 +178,12 @@ def markdup(record):
     return 1
 
 
-def markdups(bfconfig, inq, outq, outfd):
+def markdups(bfconfig: BloomFilterConfig,
+             inq: Queue,
+             outq: Queue,
+             outfd: int,
+             reads_per_template: Literal[1, 2],
+             strip_previous: bool=False) -> None:
     """
     Process SAM file records.
 
@@ -172,38 +193,50 @@ def markdups(bfconfig, inq, outq, outfd):
              records.
         outq: multiprocessing.Queue to put results.
         outfd: output stream file descriptor.
+        reads_per_template: 1 or 2.
+        strip_previous: unset duplicate flag bit for any reads that have it
+            set and are no longer considered duplicate (default=False). Not
+            necessary unless records have previously been through a duplicate
+            marking step, in which case it is strongly recommended for
+            sensible results.
 
-    Results are added to the queue as:
+    Results are added to the queue as a Metrics instance:
 
         {
-            READ_PAIRS: n_qname,                    # read pairs (qnames) seen
-            READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,  # read pairs marked dup
-            ALIGNMENTS: n_align,                    # alignments seen
+            TEMPLATES:                   n_tpl,     # templates (qnames) seen
+            TEMPLATES_MARKED_DUPLICATE:  n_tpl_dup, # templates marked dup
+            ALIGNMENTS:                  n_aln,     # alignments seen
             ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup  # alignments marked dup
         }
     """
     bf = BloomFilter.copy(bfconfig)
-    n_qname, n_rp_dup, n_align, n_aln_dup = 0, 0, 0, 0
+    n_tpl, n_tpl_dup, n_aln, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = inq.get()
         outlines = []
         if batch == SENTINEL:
             break
         for group in batch:
-            n_qname += 1
-            n_align += len(group)
+            n_tpl += 1
+            n_aln += len(group)
             qnamegrp = [r.strip().split('\t') for r in group]
-            if (ends := readends(qnamegrp)):
-                ends_str = [f'{end[0]}_{end[1]}{end[2]}' for end in ends]
-                if (
-                        # one end mapped and is dupe
-                        (ends[1] == UNMAPPED and not bf.add(ends_str[0])) or
-                        # both ends mapped and frag is dupe
-                        not bf.add(''.join(ends_str))
-                ):
-                    n_rp_dup += 1
-                    for read in qnamegrp:
-                        n_aln_dup += markdup(read)
+            ends = readends(qnamegrp)
+            if len(ends) != reads_per_template:
+                errmsg = (MSG_NOTSINGLE if reads_per_template == 1 else
+                          MSG_NOTPAIRED)
+                raise ValueError(errmsg % (qnamegrp[0][0], len(ends)))
+            ends_str = ''.join([f'{end[0]}_{end[1]}{end[2]}' for end in ends])
+            # sort order => if 1st is unmapped, all are
+            if ends[0] == UNMAPPED:
+                pass
+            # ends already seen => dupe
+            elif not bf.add(ends_str):
+                n_tpl_dup += 1
+                for read in qnamegrp:
+                    n_aln_dup += markdup(read)
+            elif strip_previous:
+                for read in qnamegrp:
+                    unmarkdup(read)
             for read in qnamegrp:
                 outlines.append('\t'.join(read))
         # Write the batch as a batch. In contrast to sys.stdout.write,
@@ -211,53 +244,52 @@ def markdups(bfconfig, inq, outq, outfd):
         # using an output queue.
         out = '\n'.join(outlines) + '\n'
         os.write(outfd, out.encode('ascii'))
-    outq.put({
-        READ_PAIRS:                  n_qname,
-        READ_PAIRS_MARKED_DUPLICATE: n_rp_dup,
-        ALIGNMENTS:                  n_align,
-        ALIGNMENTS_MARKED_DUPLICATE: n_aln_dup,
-    })
+    outq.put(Metrics({
+        'TEMPLATES':                   n_tpl,
+        'TEMPLATES_MARKED_DUPLICATE':  n_tpl_dup,
+        'ALIGNMENTS':                  n_aln,
+        'ALIGNMENTS_MARKED_DUPLICATE': n_aln_dup,
+    }))
 
 
-def mem_calc(n, p):
+def output_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
     """
-    Returns approximate memory requirement in GB for n items and target maximum
-    false positive rate p.
-    """
-    m, _ = BloomFilter.optimal_m_k(n, p)
-    return m / 8 / 1024 ** 3
-
-
-def output_metrics(metrics, metfh):
-    """
-    Output metrics.
+    Output aggregate metrics.
 
     Args:
-        metrics: Dict of metrics.
+        metrics: list of duplicate marking metrics from output queue.
         metfh: Open file handle for writing.
     """
-    LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE,
-                metrics[UNIQUE_ITEMS_APPROXIMATE])
-    LOGGER.info(MSG_ALIGNMENTS, metrics[ALIGNMENTS])
+    agg = Metrics(
+        ALIGNMENTS=sum(m['ALIGNMENTS'] for m in metrics),
+        ALIGNMENTS_MARKED_DUPLICATE=sum(
+            m['ALIGNMENTS_MARKED_DUPLICATE'] for m in metrics),
+        TEMPLATES=sum(m['TEMPLATES'] for m in metrics),
+        TEMPLATES_MARKED_DUPLICATE=sum(
+            m['TEMPLATES_MARKED_DUPLICATE'] for m in metrics))
+    agg['TEMPLATE_DUPLICATE_FRACTION'] = (
+            agg['TEMPLATES_MARKED_DUPLICATE']/agg['TEMPLATES'])
+
+    LOGGER.info(MSG_ALIGNMENTS, agg['ALIGNMENTS'])
     LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
-                metrics[ALIGNMENTS_MARKED_DUPLICATE])
-    LOGGER.info(MSG_READ_PAIRS, metrics[READ_PAIRS])
-    LOGGER.info(MSG_READ_PAIRS_MARKED_DUPLICATE,
-                metrics[READ_PAIRS_MARKED_DUPLICATE])
-    LOGGER.info(MSG_READ_PAIR_DUPLICATE_FRACTION,
-                metrics[READ_PAIR_DUPLICATE_FRACTION])
+                agg['ALIGNMENTS_MARKED_DUPLICATE'])
+    LOGGER.info(MSG_TEMPLATES, agg['TEMPLATES'])
+    LOGGER.info(MSG_TEMPLATES_MARKED_DUPLICATE,
+                agg['TEMPLATES_MARKED_DUPLICATE'])
+    LOGGER.info(MSG_TEMPLATE_DUPLICATE_FRACTION,
+                agg['TEMPLATE_DUPLICATE_FRACTION'])
     metfh.write(
         # kludge to output rounded floats
         # https://stackoverflow.com/a/29066406/6705037
         json.dumps(
             json.loads(
-                json.dumps(metrics),
+                json.dumps(agg),
                 parse_float=lambda x: round(float(x), 4)),
             indent=2,
             sort_keys=True))
 
 
-def parse_cmdargs(args):
+def parse_cmdargs(args: List[str]) -> argparse.Namespace:
     """
     Returns: Parsed arguments
     """
@@ -272,10 +304,19 @@ def parse_cmdargs(args):
                         default=DEFAULT_METRICS,
                         help=('Output metrics file '
                               f'(default={DEFAULT_METRICS}).'))
+    templatereads = parser.add_mutually_exclusive_group(required=True)
+    templatereads.add_argument('--single',
+                               dest='reads_per_template',
+                               action='store_const',
+                               const=1)
+    templatereads.add_argument('--paired',
+                               dest='reads_per_template',
+                               action='store_const',
+                               const=2)
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
-                        help=('Expected maximum number of read pairs n '
+                        help=('Expected maximum number of templates n '
                               f'(default={DEFAULT_NITEMS:.2E}).'))
     parser.add_argument('-p', '--fp-rate',
                         type=float,
@@ -292,20 +333,21 @@ def parse_cmdargs(args):
                         help=('Specify the number of SAM records in each '
                               'batch for the input queue. If not specified, '
                               'the heuristic 400/nconsumers is used.'))
-    parser.add_argument('--mem-calc',
-                        type=float,
-                        nargs=2,
-                        metavar=('N_ITEMS', 'FP_RATE'),
-                        help=('Print approximate memory requirement in GB '
-                              'for n items and target maximum false positive '
-                              'rate p.'))
+    parser.add_argument('--strip-previous',
+                        action='store_true',
+                        help=('Unset duplicate flag bit for any reads that '
+                              'have it set and are no longer considered '
+                              'duplicate (default=False). Not required unless '
+                              'records have previously been through a '
+                              'duplicate marking step, in which case it is '
+                              'strongly recommended for sensible results.'))
     parser.add_argument('--version',
                         action='version',
                         version=VERSION)
     return parser.parse_args(args)
 
 
-def pgline(last):
+def pgline(last: str) -> str:
     """
     Return the @PG header line for data processed by this tool.
 
@@ -329,7 +371,7 @@ def pgline(last):
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
-def readends(qnamegrp):
+def readends(qnamegrp: List[List[str]]) -> List[Tuple[str, int, str]]:
     """
     Calculate ends of the fragment, accounting for soft-clipped bases.
 
@@ -338,16 +380,25 @@ def readends(qnamegrp):
             of str — i.e. the result of calling .split(TAB) on a SAM text line.
 
     Returns:
-        None if there are no aligned primary reads, otherwise a coord-sorted
-        pair of ends:
+        For single-end reads, a one-element list:
+
+            [(rname, ref_start, orientation)]
+
+        For paired-end reads, a two-element coordinate-sorted list:
 
             [(left_rname, left_ref_start, left_orientation),
                 (right_rname, right_ref_end, right_orientation)]
 
-        a single unmapped end always appears last with the value UNMAPPED.
+        Unmapped reads have the special end value `UNMAPPED` that sorts after
+        any mapped end. Hence pairs with no aligned primary reads return:
+
+            [UNMAPPED, UNMAPPED]
+
+        and pairs with one aligned primary read return:
+
+            [(rname, ref_start, orientation), UNMAPPED]
     """
-    ends = [UNMAPPED, UNMAPPED]
-    idx = 0
+    ends = []
     for read in qnamegrp:
         flag      = int(read[1])
         rname     =     read[2]
@@ -358,12 +409,12 @@ def readends(qnamegrp):
             continue
         # unmapped
         if flag & FLAG_UNMAPPED:
-            pass
+            ends.append(UNMAPPED)
         # forward
         elif not flag & FLAG_REVERSE:
             # Leading soft clips.
             leading_s = int(match[1]) if (match := RE_LEADING_S(cigar)) else 0
-            ends[idx] = rname, ref_start - leading_s, 'F'
+            ends.append((rname, ref_start - leading_s, 'F'))
         # reverse
         else:
             # Trailing soft clips
@@ -371,51 +422,66 @@ def readends(qnamegrp):
             ref_end = ref_start
             for num, op in RE_CIGAR(cigar):
                 ref_end += (int(num) if op in CIGAR_CONSUMES_REF else 0)
-            ends[idx] = rname, ref_end + trailing_s, 'R'
-        idx += 1
-    assert idx == 2
+            ends.append((rname, ref_end + trailing_s, 'R'))
 
     # Canonical ordering: l < r and UNMAPPED is always last by construction.
     ends.sort()
-    return None if ends == [UNMAPPED, UNMAPPED] else ends
+    return ends
 
 
-def main():
+def unmarkdup(record: List[str]) -> None:
+    """
+    If the record is currently marked as a duplicate, update it in place to
+    remove the duplicate flag and add or update the PG:Z: tag. This handles
+    the case where a record was marked duplicate by an earlier PG but is not
+    considered as duplicate by streammd.
+
+    Args:
+        record: list of SAM record str tokens.
+    """
+    flag = int(record[1])
+    if flag | FLAG_DUPLICATE:
+        record[1] = str(flag ^ FLAG_DUPLICATE)
+        pg_old, pg_new = None, f'{PGTAG}:{PGID}'
+        for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
+            if opt.startswith(PGTAG):
+                pg_old = opt
+                record[i] = pg_new
+        if not pg_old:
+            record.append(pg_new)
+
+
+def main() -> None:
     """
     Run as CLI script.
     """
     args = parse_cmdargs(sys.argv[1:])
-    if args.mem_calc:
-        print(f'{mem_calc(*args.mem_calc):0.3f}GB')
-        sys.exit(0)
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
     nconsumers = args.consumer_processes
-    inputbatchsize = args.input_batch_size
-    inq = Queue(20 * nconsumers)
-    outq = Queue(nconsumers)
+    reads = args.reads_per_template
+    inq: 'Queue[str]' = Queue(20 * nconsumers)
+    outq: 'Queue[Metrics]' = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
           open(args.input) as infh,
           open(args.output, 'w') as outfh,
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
-        reader = Process(target=input_alnfile,
-                         args=(infd, outfd, inq, nconsumers, inputbatchsize))
+        reader_args = (infd, outfd, inq, nconsumers, args.input_batch_size)
+        reader = Process(target=input_alnfile, args=reader_args)
         reader.start()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
+        markdups_args = (bf.config, inq, outq, outfd, args.reads_per_template,
+                         args.strip_previous)
         consumers = [
-            Process(target=markdups, args=(bf.config, inq, outq, outfd))
+            Process(target=markdups, args=markdups_args)
             for _ in range(nconsumers)
         ]
         list(map(lambda x: x.start(), consumers))
         list(map(lambda x: x.join(), consumers))
         reader.join()
-        counts = [outq.get() for _ in range(nconsumers)]
-        metrics = {k: sum(d[k] for d in counts) for k in counts[0]}
-        metrics[UNIQUE_ITEMS_APPROXIMATE] = bf.count()
-        metrics[READ_PAIR_DUPLICATE_FRACTION] = (
-                metrics[READ_PAIRS_MARKED_DUPLICATE]/metrics[READ_PAIRS])
-        output_metrics(metrics, metfh)
+        LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
+        output_metrics([outq.get() for _ in range(nconsumers)], metfh)
 
 
 if __name__ == '__main__':
