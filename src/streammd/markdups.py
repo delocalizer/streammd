@@ -60,6 +60,7 @@ SAM_OPTS_IDX = 11
 SENTINEL = 'STOP'
 # DEL sorts last in ascii
 DEL = b'\x7F'.decode('ascii')
+TAB = '\t'
 UNMAPPED = (DEL, 0, '')
 VERSION = metadata.version(PGID)
 
@@ -76,22 +77,22 @@ class Metrics(TypedDict, total=False):
 
 
 def input_alnfile(infd: int|str,
-                  outfd: int,
-                  inq: Queue,
+                  outq: Queue,
+                  workq: Queue,
                   nconsumers: int,
                   batchsize:Optional[int]=None) -> None:
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
-    in batches.
+    for processing in batches.
 
-    Header lines are written directly to the output stream.
+    Header lines are written directly to the output queue.
 
     Args:
         infd: Input stream file name or descriptor.
-        outfd: Output stream file descriptor.
-        inq: multiprocessing.Queue to put SAM records.
+        outq: multiprocesing.Queue to put header.
+        workq: multiprocessing.Queue to put SAM records.
         nconsumers: Number of consumer processes.
-        batchsize: Number of qnames per batch put into inq. The reader operates
+        batchsize: Number of qnames per batch put into workq. The reader works
             at fixed speed so bigger batch size => lower rate at which batches
             are added to the queue. Up to a point this reduces queue overhead
             (fewer put/get ops) but beyond that the rate of supply to the queue
@@ -111,24 +112,24 @@ def input_alnfile(infd: int|str,
     batch_sz = 0
     qname_group = []
     qname_last = None
-    header_done = None
+    header = None
     headlines = []
     batchsize = batchsize or ceil(400/nconsumers)
     LOGGER.info(MSG_BATCHSIZE, batchsize)
     with open(infd) as infh:
         for line in infh:
-            if header_done:
+            if header:
                 qname = line.partition('\t')[0]
                 if qname == qname_last:
                     qname_group.append(line)
                 else:
                     n_qname += 1
                     if n_qname % DEFAULT_LOGINTERVAL == 0:
-                        LOGGER.debug(MSG_QSIZE, n_qname, inq.qsize())
+                        LOGGER.debug(MSG_QSIZE, n_qname, workq.qsize())
                     batch.append(qname_group)
                     batch_sz += 1
                     if batch_sz == batchsize:
-                        inq.put(batch)
+                        workq.put(batch)
                         batch = []
                         batch_sz = 0
                     qname_last = qname
@@ -139,14 +140,14 @@ def input_alnfile(infd: int|str,
                 if not headlines:
                     raise ValueError(MSG_NOHEADER)
                 headlines.append(pgline(headlines[-1]))
-                header_done = ''.join(headlines)
-                os.write(outfd, header_done.encode('ascii'))
+                header = ''.join(headlines)
+                outq.put(header)
                 qname_last = line.partition('\t')[0]
                 qname_group = [line]
     batch.append(qname_group)
-    inq.put(batch)
+    workq.put(batch)
     for _ in range(nconsumers):
-        inq.put(SENTINEL)
+        workq.put(SENTINEL)
 
 
 def markdup(record: List[str]) -> int:
@@ -179,9 +180,9 @@ def markdup(record: List[str]) -> int:
 
 
 def markdups(bfconfig: BloomFilterConfig,
-             inq: Queue,
+             workq: Queue,
              outq: Queue,
-             outfd: int,
+             resultq: Queue,
              reads_per_template: Literal[1, 2],
              strip_previous: bool=False) -> None:
     """
@@ -189,10 +190,10 @@ def markdups(bfconfig: BloomFilterConfig,
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        inq: multiprocessing.Queue to get batches of qname grouped SAM
+        workq: multiprocessing.Queue to get batches of qname grouped SAM
              records.
-        outq: multiprocessing.Queue to put results.
-        outfd: output stream file descriptor.
+        outq: multiprocessing.Queue to put processed SAM records.
+        resultq: multiprocessing.Queue to put metrics.
         reads_per_template: 1 or 2.
         strip_previous: unset duplicate flag bit for any reads that have it
             set and are no longer considered duplicate (default=False). Not
@@ -200,7 +201,7 @@ def markdups(bfconfig: BloomFilterConfig,
             marking step, in which case it is strongly recommended for
             sensible results.
 
-    Results are added to the queue as a Metrics instance:
+    Results are added to the result queue as a Metrics instance:
 
         {
             TEMPLATES:                   n_tpl,     # templates (qnames) seen
@@ -212,8 +213,7 @@ def markdups(bfconfig: BloomFilterConfig,
     bf = BloomFilter.copy(bfconfig)
     n_tpl, n_tpl_dup, n_aln, n_aln_dup = 0, 0, 0, 0
     while True:
-        batch = inq.get()
-        outlines = []
+        batch = workq.get()
         if batch == SENTINEL:
             break
         for group in batch:
@@ -238,18 +238,37 @@ def markdups(bfconfig: BloomFilterConfig,
                 for read in qnamegrp:
                     unmarkdup(read)
             for read in qnamegrp:
-                outlines.append('\t'.join(read))
-        # Write the batch as a batch. In contrast to sys.stdout.write,
-        # os.write is atomic so we don't have to care about locking or
-        # using an output queue.
-        out = '\n'.join(outlines) + '\n'
-        os.write(outfd, out.encode('ascii'))
-    outq.put(Metrics({
+                outq.put(f'{TAB.join(read)}\n')
+    resultq.put(Metrics({
         'TEMPLATES':                   n_tpl,
         'TEMPLATES_MARKED_DUPLICATE':  n_tpl_dup,
         'ALIGNMENTS':                  n_aln,
         'ALIGNMENTS_MARKED_DUPLICATE': n_aln_dup,
     }))
+
+
+def output_alnfile(outq, outfh, writebatchsize=1000):
+    """
+    Consume text items from outq and write them to outfh.
+
+    Args:
+        outq: multiprocessing.Queue to get header and processed qname groups of
+            SAM records.
+        outfh: Writeable text file handle.
+
+    """
+    batch = []
+    batch_sz = 0
+    while True:
+        item = outq.get()
+        if item == SENTINEL:
+            break
+        batch.append(item)
+        batch_sz += 1
+        if batch_sz == writebatchsize:
+            outfh.writelines(batch)
+            batch = []
+            batch_sz = 0
 
 
 def output_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
@@ -460,28 +479,34 @@ def main() -> None:
     LOGGER.info(' '.join(sys.argv))
     nconsumers = args.consumer_processes
     reads = args.reads_per_template
-    inq: 'Queue[str]' = Queue(20 * nconsumers)
-    outq: 'Queue[Metrics]' = Queue(nconsumers)
+    workq: 'Queue[str]' = Queue(20 * nconsumers)
+    outq: 'Queue[str]' = Queue(2000 * nconsumers)
+    resultq: 'Queue[Metrics]' = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
           open(args.input) as infh,
           open(args.output, 'w') as outfh,
           open(args.metrics, 'w') as metfh):
         infd, outfd = infh.fileno(), outfh.fileno()
-        reader_args = (infd, outfd, inq, nconsumers, args.input_batch_size)
+        reader_args = (infd, outq, workq, nconsumers, args.input_batch_size)
         reader = Process(target=input_alnfile, args=reader_args)
+        writer_args = (outq, outfh)
+        writer = Process(target=output_alnfile, args=writer_args)
         reader.start()
+        writer.start()
         bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        markdups_args = (bf.config, inq, outq, outfd, args.reads_per_template,
-                         args.strip_previous)
+        markdups_args = (bf.config, workq, outq, resultq,
+                         args.reads_per_template, args.strip_previous)
         consumers = [
             Process(target=markdups, args=markdups_args)
             for _ in range(nconsumers)
         ]
         list(map(lambda x: x.start(), consumers))
         list(map(lambda x: x.join(), consumers))
+        outq.put(SENTINEL)
         reader.join()
+        writer.join()
         LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
-        output_metrics([outq.get() for _ in range(nconsumers)], metfh)
+        output_metrics([resultq.get() for _ in range(nconsumers)], metfh)
 
 
 if __name__ == '__main__':
