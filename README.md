@@ -10,7 +10,7 @@ at the end of processing.
 ### Features
 
 * Very fast — with default settings (2 hashing processes) `streammd` is
-  typically &#8776; 3x faster than Picard MarkDuplicates; even faster is easily
+  typically &#8776; 2.5x as fast as Picard MarkDuplicates; much faster is easily
   achievable using more hashers.
 * Low memory use, even for large libraries — with default settings (_p_=10<sup>-6</sup>)
   `streammd` requires less than 4GB to process 1B templates.
@@ -95,5 +95,5 @@ want to write the outputs to bam format using `samtools view` you should use
 extra compression threads for optimal throughput:
 
 ```bash
-samtools view -h some.bam|streammd|samtools view -@4 -o some.MD.bam
+samtools view -h some.bam|streammd|samtools view -@2 -o some.MD.bam
 ```
