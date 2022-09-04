@@ -248,7 +248,7 @@ def markdups(bfconfig: BloomFilterConfig,
     }))
 
 
-def output_alnfile(outq, outfh, writebatchsize=1000):
+def output_alnfile(outq, outfh):
     """
     Consume text items from outq and write them to outfh.
 
@@ -258,18 +258,11 @@ def output_alnfile(outq, outfh, writebatchsize=1000):
         outfh: Writeable text file handle.
 
     """
-    batch = []
-    batch_sz = 0
     while True:
         item = outq.get()
         if item == SENTINEL:
             break
-        batch.append(item)
-        batch_sz += 1
-        if batch_sz == writebatchsize:
-            outfh.writelines(batch)
-            batch = []
-            batch_sz = 0
+        outfh.write(item)
 
 
 def output_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
