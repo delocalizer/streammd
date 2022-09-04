@@ -60,7 +60,6 @@ SAM_OPTS_IDX = 11
 SENTINEL = 'STOP'
 # DEL sorts last in ascii
 DEL = b'\x7F'.decode('ascii')
-TAB = '\t'
 UNMAPPED = (DEL, 0, '')
 VERSION = metadata.version(PGID)
 
@@ -214,6 +213,7 @@ def markdups(bfconfig: BloomFilterConfig,
     n_tpl, n_tpl_dup, n_aln, n_aln_dup = 0, 0, 0, 0
     while True:
         batch = workq.get()
+        outlines = []
         if batch == SENTINEL:
             break
         for group in batch:
@@ -238,7 +238,8 @@ def markdups(bfconfig: BloomFilterConfig,
                 for read in qnamegrp:
                     unmarkdup(read)
             for read in qnamegrp:
-                outq.put(f'{TAB.join(read)}\n')
+                outlines.append('\t'.join(read))
+        outq.put('\n'.join(outlines) + '\n')
     resultq.put(Metrics({
         'TEMPLATES':                   n_tpl,
         'TEMPLATES_MARKED_DUPLICATE':  n_tpl_dup,
@@ -480,7 +481,7 @@ def main() -> None:
     nconsumers = args.consumer_processes
     reads = args.reads_per_template
     workq: 'Queue[str]' = Queue(20 * nconsumers)
-    outq: 'Queue[str]' = Queue(2000 * nconsumers)
+    outq: 'Queue[str]' = Queue(20 * nconsumers)
     resultq: 'Queue[Metrics]' = Queue(nconsumers)
     with (SharedMemoryManager() as smm,
           open(args.input) as infh,
