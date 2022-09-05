@@ -32,7 +32,7 @@ DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
-MSG_PARAMS = 'n=%.2E; p=%.2E; nconsumers=%s; batchsize=%s;'
+MSG_PARAMS = 'n=%.2E; p=%.2E; nworkers=%s; batchsize=%s;'
 MSG_NOHEADER = 'no header lines detected'
 MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
                  'single-end reads?')
@@ -207,10 +207,10 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_FPRATE,
                         help=('Target maximum false positive rate when n items '
                               f'are stored (default={DEFAULT_FPRATE:.2E}).'))
-    parser.add_argument('--consumer-processes',
+    parser.add_argument('-w', '--workers',
                         type=int,
                         default=DEFAULT_NWORKERS,
-                        help=('Number of hashing processes '
+                        help=('Number of worker processes '
                               f'(default={DEFAULT_NWORKERS}).'))
     parser.add_argument('--strip-previous',
                         action='store_true',
@@ -228,7 +228,7 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                               f'(default={DEFAULT_WORKQBATCHSIZE}). '
                               'The default value performs well in most cases; '
                               'adjustments for SAM record size and number of '
-                              'hashing processes may yield small performance '
+                              'worker processes may yield small performance '
                               'improvements.'))
     parser.add_argument('--version',
                         action='version',
@@ -249,21 +249,19 @@ def pgline(last: str) -> str:
         f'CL:{" ".join(sys.argv)}',
         f'VN:{VERSION}'
     ]
-    PP = None
+    prev = None
     tkns = last.strip().split('\t')
     if tkns[0] == '@PG':
-        prev = {tag: value for tag, value in
-                (tkn.split(':', 1) for tkn in tkns[1:])}
-        PP = prev.get('ID')
-    if PP:
-        tags.insert(2, f'PP:{PP}')
+        prev = dict(tkn.split(':', 1) for tkn in tkns[1:])['ID']
+    if prev:
+        tags.insert(2, f'PP:{prev}')
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
 def read_input(infh: TextIO,
                outq: SimpleQueue,
                workq: SimpleQueue,
-               nconsumers: int,
+               nworkers: int,
                batchsize: int=500) -> None:
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
@@ -275,13 +273,14 @@ def read_input(infh: TextIO,
         infh: Input stream file handle for reading.
         outq: multiprocesing.Queue to put header.
         workq: SimpleQueue to put SAM records.
-        nconsumers: Number of consumer processes.
+        nworkers: Number of workers.
         batchsize: Number of qnames per batch put into the workq (default=500).
-            The reader works at fixed speed so bigger batch size => lower rate
-            at which batches are added to the queue. Up to a point this reduces
-            queue overhead (fewer put/get ops) but beyond that the rate of
-            supply falls below the value required to keep all consumers
-            sufficiently fed and they block on get calls.
+            The single producer runs at fixed speed so bigger batch size =>
+            lower rate at which batches are added to the queue. Up to a point
+            this reduces queue overhead (fewer put/get ops) but beyond that
+            the rate of supply falls below the value required to keep all
+            consumers continually fed and they waste time blocking on get
+            calls.
 
     Returns:
         None
@@ -325,7 +324,7 @@ def read_input(infh: TextIO,
             qname_group = [line]
     batch.append(qname_group)
     workq.put(batch)
-    for _ in range(nconsumers):
+    for _ in range(nworkers):
         workq.put(SENTINEL)
 
 
@@ -472,13 +471,13 @@ def main() -> None:
     reads = args.reads_per_template
     nitems = args.n_items
     fprate = args.fp_rate
-    nconsumers = args.consumer_processes
+    nworkers = args.workers
     strip_previous = args.strip_previous
     batchsize = args.workq_batch_size
 
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
-    LOGGER.info(MSG_PARAMS, nitems, fprate, nconsumers, batchsize)
+    LOGGER.info(MSG_PARAMS, nitems, fprate, nworkers, batchsize)
     workq: 'SimpleQueue[str]' = SimpleQueue()
     outq: 'SimpleQueue[str]' = SimpleQueue()
     resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
@@ -487,24 +486,24 @@ def main() -> None:
           open(args.output, 'wt', encoding='utf-8') as outfh,
           open(args.metrics, 'wt', encoding='utf-8') as metfh):
         reader = Process(
-            target=read_input, args=(infh, outq, workq, nconsumers, batchsize))
+            target=read_input, args=(infh, outq, workq, nworkers, batchsize))
         writer = Process(target=write_output, args=(outq, outfh))
         reader.start()
         writer.start()
         bf = BloomFilter(smm, nitems, fprate)
-        consumers = [
+        workers = [
             Process(
                 target=markdups,
                 args=(bf.config, workq, outq, resultq, reads, strip_previous))
-            for _ in range(nconsumers)
+            for _ in range(nworkers)
         ]
-        list(map(lambda x: x.start(), consumers))
-        list(map(lambda x: x.join(), consumers))
+        list(map(lambda x: x.start(), workers))
+        list(map(lambda x: x.join(), workers))
         outq.put(SENTINEL)
         reader.join()
         writer.join()
         LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
-        write_metrics([resultq.get() for _ in range(nconsumers)], metfh)
+        write_metrics([resultq.get() for _ in range(nworkers)], metfh)
 
 
 if __name__ == '__main__':
