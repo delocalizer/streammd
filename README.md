@@ -9,11 +9,11 @@ at the end of processing.
 
 ### Features
 
-* Very fast — with default settings (2 hashing processes) `streammd` is
-  typically &#8776; 3x faster than Picard MarkDuplicates; even faster is easily
-  achievable using more hashers.
-* Low memory use, even for large libraries — with default settings (_p_=10<sup>-6</sup>)
-  `streammd` requires less than 4GB to process 1B templates.
+* Very fast — with default settings `streammd` is more than 2x as fast as
+  Picard MarkDuplicates, and much faster is easily achievable using more
+  workers.
+* Low memory use, even for large libraries — with default settings `streammd`
+  requires less than 4GB to process 1B templates.
 * High concordance with Picard MarkDuplicates metrics.
 * Soft-clipped reads are correctly handled.
 * Tunable target false positive rate.
@@ -31,7 +31,7 @@ Inherent, due to the nature of the single-pass operation:
 
 Implementation specific:
 
-* Output is not deterministic when using more than 1 consumer process.
+* Output is not deterministic when using more than 1 worker process.
 
 ## Install
 
@@ -59,7 +59,7 @@ streammd --help
 1. mark duplicates on an input SAM file record stream 
 
 ```bash
-samtools view -h some.bam|streammd
+samtools view -h some.bam|streammd --paired
 ```
 
 ## Notes
@@ -86,14 +86,18 @@ As a guide, 60x human WGS 2x150bp paired-end sequencing consists of
 n &#8776; 6.00E+08 templates. Run the included `memcalc` tool to get an
 estimate of `streammd` memory use for a given `n` and `p`.
 
-### Handling outputs
+### Pipelining
 
-When using the default settings `streammd` writes outputs to STDOUT extremely
-rapidly. In a pipeline this can mean anything downstream will become a
-bottleneck if it can't process its inputs fast enough — for example, if you
-want to write the outputs to bam format using `samtools view` you should use 
+By using multiple worker processes `streammd` is capable of generating outputs
+at a very high rate. For efficient pipelining, downstream tools should be run
+with sufficient cpu resources to handle their inputs — for example if you want
+to write the outputs to bam format using `samtools view` you should specify
 extra compression threads for optimal throughput:
 
 ```bash
-samtools view -h some.bam|streammd|samtools view -@4 -o some.MD.bam
+samtools view -h some.bam|streammd --paired|samtools view -@2 -o some.MD.bam
 ```
+
+By the same token, there's no value in increasing `streammd` throughput by
+specifying larger values for `-w, --workers` if a downstream tool does not have
+the processing speed to handle it.

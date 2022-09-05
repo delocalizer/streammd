@@ -8,10 +8,9 @@ Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
 from importlib import metadata
-from math import ceil
-from multiprocessing import Process, Queue
+from multiprocessing import Process, SimpleQueue
 from multiprocessing.managers import SharedMemoryManager
-from typing import List, Literal, Optional, TextIO, Tuple, TypedDict
+from typing import List, Literal, TextIO, Tuple, TypedDict
 import argparse
 import json
 import logging
@@ -28,17 +27,18 @@ DEFAULT_FPRATE = 1e-6
 DEFAULT_LOGINTERVAL = 1000000
 DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
-DEFAULT_NWORKERS = 4
+DEFAULT_NWORKERS = 2
+DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
-MSG_BATCHSIZE = 'running with batchsize=%s'
+MSG_PARAMS = 'n=%.2E; p=%.2E; nworkers=%s; batchsize=%s;'
 MSG_NOHEADER = 'no header lines detected'
 MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
                  'single-end reads?')
 MSG_NOTPAIRED = ('%s: expected 2 primary alignments, got %s. Input is not '
                  'paired-end reads or not qname grouped?')
-MSG_QSIZE = 'after %s qnames seen, approx input queue size is %s'
+MSG_NQNAMES = 'qnames read: %s'
 MSG_TEMPLATES = 'templates seen: %s'
 MSG_TEMPLATES_MARKED_DUPLICATE = 'templates marked duplicate: %s'
 MSG_TEMPLATE_DUPLICATE_FRACTION = 'template duplicate fraction: %0.4f'
@@ -75,80 +75,6 @@ class Metrics(TypedDict, total=False):
     TEMPLATE_DUPLICATE_FRACTION: float
 
 
-def input_alnfile(infd: int|str,
-                  outfd: int,
-                  inq: Queue,
-                  nconsumers: int,
-                  batchsize:Optional[int]=None) -> None:
-    """
-    Read records from a qname-grouped SAM file input stream and enqueue them
-    in batches.
-
-    Header lines are written directly to the output stream.
-
-    Args:
-        infd: Input stream file name or descriptor.
-        outfd: Output stream file descriptor.
-        inq: multiprocessing.Queue to put SAM records.
-        nconsumers: Number of consumer processes.
-        batchsize: Number of qnames per batch put into inq. The reader operates
-            at fixed speed so bigger batch size => lower rate at which batches
-            are added to the queue. Up to a point this reduces queue overhead
-            (fewer put/get ops) but beyond that the rate of supply to the queue
-            falls below the number required to keep all consumers sufficiently
-            fed, and they end up blocking on get calls. If a batchsize value is
-            not specified, the heuristic 400/nconsumers is used. Empirically
-            this works quite well at least for 1 <= nconsumers <= 8.
-
-    Returns:
-        None
-    """
-    # the single producer process is the bottleneck so we have some fussy
-    # optimizations in here at the cost of readability — e.g. increment
-    # batch_sz rather than calling len(batch).
-    n_qname = 0
-    batch = []
-    batch_sz = 0
-    qname_group = []
-    qname_last = None
-    header_done = None
-    headlines = []
-    batchsize = batchsize or ceil(400/nconsumers)
-    LOGGER.info(MSG_BATCHSIZE, batchsize)
-    with open(infd) as infh:
-        for line in infh:
-            if header_done:
-                qname = line.partition('\t')[0]
-                if qname == qname_last:
-                    qname_group.append(line)
-                else:
-                    n_qname += 1
-                    if n_qname % DEFAULT_LOGINTERVAL == 0:
-                        LOGGER.debug(MSG_QSIZE, n_qname, inq.qsize())
-                    batch.append(qname_group)
-                    batch_sz += 1
-                    if batch_sz == batchsize:
-                        inq.put(batch)
-                        batch = []
-                        batch_sz = 0
-                    qname_last = qname
-                    qname_group = [line]
-            elif line.startswith('@'):
-                headlines.append(line)
-            else:
-                if not headlines:
-                    raise ValueError(MSG_NOHEADER)
-                headlines.append(pgline(headlines[-1]))
-                header_done = ''.join(headlines)
-                os.write(outfd, header_done.encode('ascii'))
-                qname_last = line.partition('\t')[0]
-                qname_group = [line]
-    batch.append(qname_group)
-    inq.put(batch)
-    for _ in range(nconsumers):
-        inq.put(SENTINEL)
-
-
 def markdup(record: List[str]) -> int:
     """
     Mark the record as duplicate by updating in-place the FLAG, adding or
@@ -179,9 +105,9 @@ def markdup(record: List[str]) -> int:
 
 
 def markdups(bfconfig: BloomFilterConfig,
-             inq: Queue,
-             outq: Queue,
-             outfd: int,
+             workq: SimpleQueue,
+             outq: SimpleQueue,
+             resultq: SimpleQueue,
              reads_per_template: Literal[1, 2],
              strip_previous: bool=False) -> None:
     """
@@ -189,10 +115,9 @@ def markdups(bfconfig: BloomFilterConfig,
 
     Args:
         bfconfig: Bloom filter configuration dict.
-        inq: multiprocessing.Queue to get batches of qname grouped SAM
-             records.
-        outq: multiprocessing.Queue to put results.
-        outfd: output stream file descriptor.
+        workq: SimpleQueue to get batches of qname grouped SAM records.
+        outq: SimpleQueue to put processed SAM records.
+        resultq: SimpleQueue to put metrics.
         reads_per_template: 1 or 2.
         strip_previous: unset duplicate flag bit for any reads that have it
             set and are no longer considered duplicate (default=False). Not
@@ -200,7 +125,7 @@ def markdups(bfconfig: BloomFilterConfig,
             marking step, in which case it is strongly recommended for
             sensible results.
 
-    Results are added to the queue as a Metrics instance:
+    Results are added to the result queue as a Metrics instance:
 
         {
             TEMPLATES:                   n_tpl,     # templates (qnames) seen
@@ -212,7 +137,7 @@ def markdups(bfconfig: BloomFilterConfig,
     bf = BloomFilter.copy(bfconfig)
     n_tpl, n_tpl_dup, n_aln, n_aln_dup = 0, 0, 0, 0
     while True:
-        batch = inq.get()
+        batch = workq.get()
         outlines = []
         if batch == SENTINEL:
             break
@@ -239,12 +164,8 @@ def markdups(bfconfig: BloomFilterConfig,
                     unmarkdup(read)
             for read in qnamegrp:
                 outlines.append('\t'.join(read))
-        # Write the batch as a batch. In contrast to sys.stdout.write,
-        # os.write is atomic so we don't have to care about locking or
-        # using an output queue.
-        out = '\n'.join(outlines) + '\n'
-        os.write(outfd, out.encode('ascii'))
-    outq.put(Metrics({
+        outq.put('\n'.join(outlines) + '\n')
+    resultq.put(Metrics({
         'TEMPLATES':                   n_tpl,
         'TEMPLATES_MARKED_DUPLICATE':  n_tpl_dup,
         'ALIGNMENTS':                  n_aln,
@@ -252,48 +173,20 @@ def markdups(bfconfig: BloomFilterConfig,
     }))
 
 
-def output_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
-    """
-    Output aggregate metrics.
-
-    Args:
-        metrics: list of duplicate marking metrics from output queue.
-        metfh: Open file handle for writing.
-    """
-    agg = Metrics(
-        ALIGNMENTS=sum(m['ALIGNMENTS'] for m in metrics),
-        ALIGNMENTS_MARKED_DUPLICATE=sum(
-            m['ALIGNMENTS_MARKED_DUPLICATE'] for m in metrics),
-        TEMPLATES=sum(m['TEMPLATES'] for m in metrics),
-        TEMPLATES_MARKED_DUPLICATE=sum(
-            m['TEMPLATES_MARKED_DUPLICATE'] for m in metrics))
-    agg['TEMPLATE_DUPLICATE_FRACTION'] = (
-            agg['TEMPLATES_MARKED_DUPLICATE']/agg['TEMPLATES'])
-
-    LOGGER.info(MSG_ALIGNMENTS, agg['ALIGNMENTS'])
-    LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
-                agg['ALIGNMENTS_MARKED_DUPLICATE'])
-    LOGGER.info(MSG_TEMPLATES, agg['TEMPLATES'])
-    LOGGER.info(MSG_TEMPLATES_MARKED_DUPLICATE,
-                agg['TEMPLATES_MARKED_DUPLICATE'])
-    LOGGER.info(MSG_TEMPLATE_DUPLICATE_FRACTION,
-                agg['TEMPLATE_DUPLICATE_FRACTION'])
-    metfh.write(
-        # kludge to output rounded floats
-        # https://stackoverflow.com/a/29066406/6705037
-        json.dumps(
-            json.loads(
-                json.dumps(agg),
-                parse_float=lambda x: round(float(x), 4)),
-            indent=2,
-            sort_keys=True))
-
-
 def parse_cmdargs(args: List[str]) -> argparse.Namespace:
     """
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    templatereads = parser.add_mutually_exclusive_group(required=True)
+    templatereads.add_argument('--single',
+                               dest='reads_per_template',
+                               action='store_const',
+                               const=1)
+    templatereads.add_argument('--paired',
+                               dest='reads_per_template',
+                               action='store_const',
+                               const=2)
     parser.add_argument('--input',
                         default=0,
                         help='Input file (default=STDIN).')
@@ -304,15 +197,6 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_METRICS,
                         help=('Output metrics file '
                               f'(default={DEFAULT_METRICS}).'))
-    templatereads = parser.add_mutually_exclusive_group(required=True)
-    templatereads.add_argument('--single',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=1)
-    templatereads.add_argument('--paired',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=2)
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -323,16 +207,11 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_FPRATE,
                         help=('Target maximum false positive rate when n items '
                               f'are stored (default={DEFAULT_FPRATE:.2E}).'))
-    parser.add_argument('--consumer-processes',
+    parser.add_argument('-w', '--workers',
                         type=int,
                         default=DEFAULT_NWORKERS,
-                        help=('Number of hashing processes '
+                        help=('Number of worker processes '
                               f'(default={DEFAULT_NWORKERS}).'))
-    parser.add_argument('--input-batch-size',
-                        type=int,
-                        help=('Specify the number of SAM records in each '
-                              'batch for the input queue. If not specified, '
-                              'the heuristic 400/nconsumers is used.'))
     parser.add_argument('--strip-previous',
                         action='store_true',
                         help=('Unset duplicate flag bit for any reads that '
@@ -341,6 +220,16 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                               'records have previously been through a '
                               'duplicate marking step, in which case it is '
                               'strongly recommended for sensible results.'))
+    parser.add_argument('--workq-batch-size',
+                        type=int,
+                        default=DEFAULT_WORKQBATCHSIZE,
+                        help=('Specify the number of SAM records in each '
+                              'batch for the work queue '
+                              f'(default={DEFAULT_WORKQBATCHSIZE}). '
+                              'The default value performs well in most cases; '
+                              'adjustments for SAM record size and number of '
+                              'worker processes may yield small performance '
+                              'improvements.'))
     parser.add_argument('--version',
                         action='version',
                         version=VERSION)
@@ -360,15 +249,83 @@ def pgline(last: str) -> str:
         f'CL:{" ".join(sys.argv)}',
         f'VN:{VERSION}'
     ]
-    PP = None
+    prev = None
     tkns = last.strip().split('\t')
     if tkns[0] == '@PG':
-        prev = {tag: value for tag, value in
-                (tkn.split(':', 1) for tkn in tkns[1:])}
-        PP = prev.get('ID')
-    if PP:
-        tags.insert(2, f'PP:{PP}')
+        prev = dict(tkn.split(':', 1) for tkn in tkns[1:])['ID']
+    if prev:
+        tags.insert(2, f'PP:{prev}')
     return '\t'.join(['@PG'] + tags) + '\n'
+
+
+def read_input(infh: TextIO,
+               outq: SimpleQueue,
+               workq: SimpleQueue,
+               nworkers: int,
+               batchsize: int=500) -> None:
+    """
+    Read records from a qname-grouped SAM file input stream and enqueue them
+    for processing in batches.
+
+    Header lines are written directly to the output queue.
+
+    Args:
+        infh: Input stream file handle for reading.
+        outq: multiprocesing.Queue to put header.
+        workq: SimpleQueue to put SAM records.
+        nworkers: Number of workers.
+        batchsize: Number of qnames per batch put into the workq (default=500).
+            The single producer runs at fixed speed so bigger batch size =>
+            lower rate at which batches are added to the queue. Up to a point
+            this reduces queue overhead (fewer put/get ops) but beyond that
+            the rate of supply falls below the value required to keep all
+            consumers continually fed and they waste time blocking on get
+            calls.
+
+    Returns:
+        None
+    """
+    # the single producer process is the bottleneck so we have some fussy
+    # optimizations in here at the cost of readability — e.g. increment
+    # batch_sz rather than calling len(batch).
+    n_qname = 0
+    batch = []
+    batch_sz = 0
+    qname_group = []
+    qname_last = None
+    header = None
+    headlines = []
+    for line in infh:
+        if header:
+            qname = line.partition('\t')[0]
+            if qname == qname_last:
+                qname_group.append(line)
+            else:
+                n_qname += 1
+                if n_qname % DEFAULT_LOGINTERVAL == 0:
+                    LOGGER.debug(MSG_NQNAMES, n_qname)
+                batch.append(qname_group)
+                batch_sz += 1
+                if batch_sz == batchsize:
+                    workq.put(batch)
+                    batch = []
+                    batch_sz = 0
+                qname_last = qname
+                qname_group = [line]
+        elif line.startswith('@'):
+            headlines.append(line)
+        else:
+            if not headlines:
+                raise ValueError(MSG_NOHEADER)
+            headlines.append(pgline(headlines[-1]))
+            header = ''.join(headlines)
+            outq.put(header)
+            qname_last = line.partition('\t')[0]
+            qname_group = [line]
+    batch.append(qname_group)
+    workq.put(batch)
+    for _ in range(nworkers):
+        workq.put(SENTINEL)
 
 
 def readends(qnamegrp: List[List[str]]) -> List[Tuple[str, int, str]]:
@@ -451,37 +408,102 @@ def unmarkdup(record: List[str]) -> None:
             record.append(pg_new)
 
 
+def write_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
+    """
+    Output aggregate metrics.
+
+    Args:
+        metrics: list of duplicate marking metrics from output queue.
+        metfh: Metrics file handle for writing.
+    """
+    agg = Metrics(
+        ALIGNMENTS=sum(m['ALIGNMENTS'] for m in metrics),
+        ALIGNMENTS_MARKED_DUPLICATE=sum(
+            m['ALIGNMENTS_MARKED_DUPLICATE'] for m in metrics),
+        TEMPLATES=sum(m['TEMPLATES'] for m in metrics),
+        TEMPLATES_MARKED_DUPLICATE=sum(
+            m['TEMPLATES_MARKED_DUPLICATE'] for m in metrics))
+    agg['TEMPLATE_DUPLICATE_FRACTION'] = (
+            agg['TEMPLATES_MARKED_DUPLICATE']/agg['TEMPLATES'])
+
+    LOGGER.info(MSG_ALIGNMENTS, agg['ALIGNMENTS'])
+    LOGGER.info(MSG_ALIGNMENTS_MARKED_DUPLICATE,
+                agg['ALIGNMENTS_MARKED_DUPLICATE'])
+    LOGGER.info(MSG_TEMPLATES, agg['TEMPLATES'])
+    LOGGER.info(MSG_TEMPLATES_MARKED_DUPLICATE,
+                agg['TEMPLATES_MARKED_DUPLICATE'])
+    LOGGER.info(MSG_TEMPLATE_DUPLICATE_FRACTION,
+                agg['TEMPLATE_DUPLICATE_FRACTION'])
+    metfh.write(
+        # kludge to output rounded floats
+        # https://stackoverflow.com/a/29066406/6705037
+        json.dumps(
+            json.loads(
+                json.dumps(agg),
+                parse_float=lambda x: round(float(x), 4)),
+            indent=2,
+            sort_keys=True))
+
+
+def write_output(outq, outfh):
+    """
+    Consume text items from outq and write them to outfh.
+
+    Args:
+        outq: SimpleQueue to get header and processed qname groups of SAM
+            records.
+        outfh: Output stream file handle for writing.
+
+    """
+    while True:
+        item = outq.get()
+        if item == SENTINEL:
+            outfh.flush()
+            break
+        outfh.write(item)
+
+
 def main() -> None:
     """
     Run as CLI script.
     """
     args = parse_cmdargs(sys.argv[1:])
+    reads = args.reads_per_template
+    nitems = args.n_items
+    fprate = args.fp_rate
+    nworkers = args.workers
+    strip_previous = args.strip_previous
+    batchsize = args.workq_batch_size
+
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
-    nconsumers = args.consumer_processes
-    reads = args.reads_per_template
-    inq: 'Queue[str]' = Queue(20 * nconsumers)
-    outq: 'Queue[Metrics]' = Queue(nconsumers)
+    LOGGER.info(MSG_PARAMS, nitems, fprate, nworkers, batchsize)
+    workq: 'SimpleQueue[str]' = SimpleQueue()
+    outq: 'SimpleQueue[str]' = SimpleQueue()
+    resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
     with (SharedMemoryManager() as smm,
-          open(args.input) as infh,
-          open(args.output, 'w') as outfh,
-          open(args.metrics, 'w') as metfh):
-        infd, outfd = infh.fileno(), outfh.fileno()
-        reader_args = (infd, outfd, inq, nconsumers, args.input_batch_size)
-        reader = Process(target=input_alnfile, args=reader_args)
+          open(args.input, 'rt', encoding='utf-8') as infh,
+          open(args.output, 'wt', encoding='utf-8') as outfh,
+          open(args.metrics, 'wt', encoding='utf-8') as metfh):
+        reader = Process(
+            target=read_input, args=(infh, outq, workq, nworkers, batchsize))
+        writer = Process(target=write_output, args=(outq, outfh))
         reader.start()
-        bf = BloomFilter(smm, args.n_items, args.fp_rate)
-        markdups_args = (bf.config, inq, outq, outfd, args.reads_per_template,
-                         args.strip_previous)
-        consumers = [
-            Process(target=markdups, args=markdups_args)
-            for _ in range(nconsumers)
+        writer.start()
+        bf = BloomFilter(smm, nitems, fprate)
+        workers = [
+            Process(
+                target=markdups,
+                args=(bf.config, workq, outq, resultq, reads, strip_previous))
+            for _ in range(nworkers)
         ]
-        list(map(lambda x: x.start(), consumers))
-        list(map(lambda x: x.join(), consumers))
+        list(map(lambda x: x.start(), workers))
+        list(map(lambda x: x.join(), workers))
+        outq.put(SENTINEL)
         reader.join()
+        writer.join()
         LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
-        output_metrics([outq.get() for _ in range(nconsumers)], metfh)
+        write_metrics([resultq.get() for _ in range(nworkers)], metfh)
 
 
 if __name__ == '__main__':
