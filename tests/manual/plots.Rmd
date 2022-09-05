@@ -9,6 +9,7 @@ output: html_document
 library(tidyverse)
 library(ggplot2)
 library(gridExtra)
+library(patchwork)
 
 
 streammd <- read_delim(
