@@ -75,24 +75,18 @@ class Metrics(TypedDict, total=False):
     TEMPLATE_DUPLICATE_FRACTION: float
 
 
-def markdup(record: List[str]) -> int:
+def markdup(record: List[str]) -> None:
     """
-    Mark the record as duplicate by updating in-place the FLAG, adding or
-    updating the PG:Z: tag, and returning 1.
-
-    If the record is unmapped, no update is done and 0 is returned.
+    Mark the record as duplicate by updating in-place the FLAG and adding or
+    updating the PG:Z: tag.
 
     Args:
         record: list of SAM record str tokens.
 
-    Retuns:
-        number of duplicates marked: 1 if updated or 0 if not (unmapped read).
+    Returns:
+        None
     """
     flag = int(record[1])
-    # Replicate Picard MarkDuplicates behaviour: only an aligned read is
-    # marked as duplicate.
-    if flag & FLAG_UNMAPPED:
-        return 0
     record[1] = str(flag | FLAG_DUPLICATE)
     pg_old, pg_new = None, f'{PGTAG}:{PGID}'
     for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
@@ -101,7 +95,6 @@ def markdup(record: List[str]) -> int:
             record[i] = pg_new
     if not pg_old:
         record.append(pg_new)
-    return 1
 
 
 def markdups(bfconfig: BloomFilterConfig,
@@ -158,7 +151,8 @@ def markdups(bfconfig: BloomFilterConfig,
             elif not bf.add(ends_str):
                 n_tpl_dup += 1
                 for read in qnamegrp:
-                    n_aln_dup += markdup(read)
+                    markdup(read)
+                    n_aln_dup += 1
             elif strip_previous:
                 for read in qnamegrp:
                     unmarkdup(read)

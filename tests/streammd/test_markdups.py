@@ -402,11 +402,26 @@ class TestMarkDups(TestCase):
     def test_main_markdups_1(self):
         """
         Confirm that markdups.main() operates as expected on a larger input
-        file (approx 2000 templates with various orientations and flags)
+        file: 4058 alignments from 2027 templates, with a variety of different
+        flags, orientations, and complex CIGAR strings.
+
+        The test reference output was generated from the test input by Picard
+        MarkDuplicates (2.23.8).
+
+        The input SAM records in 'test.paired_full.sam' have been ordered with
+        higher quality reads in a duplicate set occuring first so that in this
+        case we expect the output of streammd to EXACTLY match that from
+        Picard MarkDuplicates (assuming no false positives from streammd,
+        which happens to be the case for this data with default --fp-rate and
+        seeds).
+
+        In the general case we expect only that the duplicate counts should
+        match, since Picard MarkDuplicates picks the highest quality read in a
+        set as the original, where streammd must pick the first.
         """
         expected = [
             (alignment.qname, alignment.flag) for alignment in
-            AlignmentFile(RESOURCES.joinpath('test.paired_full.streammd.sam'))]
+            AlignmentFile(RESOURCES.joinpath('test.paired_full.picardmd.sam'))]
         with (RESOURCES.joinpath('test.paired_full.sam') as inf,
                 NamedTemporaryFile() as out):
             testargs = list(
@@ -426,7 +441,7 @@ class TestMarkDups(TestCase):
         """
         expected = {
             'ALIGNMENTS': 4058,
-            'ALIGNMENTS_MARKED_DUPLICATE': 2037,
+            'ALIGNMENTS_MARKED_DUPLICATE': 2039,
             'TEMPLATES': 2027,
             'TEMPLATES_MARKED_DUPLICATE': 1018,
             'TEMPLATE_DUPLICATE_FRACTION': 0.5022
