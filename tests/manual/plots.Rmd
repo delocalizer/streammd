@@ -13,12 +13,12 @@ library(patchwork)
 
 
 streammd <- read_delim(
-  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.qname.streammd.bam.flags.sort_by_freq',
+  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.streammd.sam.flags.sort_by_freq',
   col_names=c('streammd', 'flag'),
   delim='\t',
   show_col_types=FALSE)
 picard <- read_delim(
-  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.coord.MD.bam.flags.sort_by_streammd_freq',
+  '140924_EXTERN_0588_AC1DTBACXX.lane_2.nobc.picardmd.sam.flags.sort_by_streammd_freq',
   col_names=c('picardmd', 'flag'),
   delim='\t',
   show_col_types=FALSE)
