@@ -25,6 +25,7 @@ LOGGER.addHandler(logging.StreamHandler())
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_LOGINTERVAL = 1000000
+DEFAULT_MEM = '4GiB'
 DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
 DEFAULT_NWORKERS = 2
@@ -32,7 +33,7 @@ DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
-MSG_PARAMS = 'n=%.2E; p=%.2E; nworkers=%s; batchsize=%s;'
+MSG_PARAMS = 'mem=%s; n=%.2E; p=%.2E; workers=%s; batchsize=%s;'
 MSG_NOHEADER = 'no header lines detected'
 MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
                  'single-end reads?')
@@ -172,15 +173,6 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    templatereads = parser.add_mutually_exclusive_group(required=True)
-    templatereads.add_argument('--single',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=1)
-    templatereads.add_argument('--paired',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=2)
     parser.add_argument('--input',
                         default=0,
                         help='Input file (default=STDIN).')
@@ -191,6 +183,19 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_METRICS,
                         help=('Output metrics file '
                               f'(default={DEFAULT_METRICS}).'))
+    parser.add_argument('--single',
+                        dest='reads_per_template',
+                        action='store_const',
+                        help='Accept single-ended reads as input (default is '
+                        'paired-end).',
+                        const=1,
+                        default=2)
+    parser.add_argument('-b', '--mem',
+                        default=DEFAULT_MEM,
+                        help='Human-friendly mem size for the Bloom filter '
+                        f'(default="{DEFAULT_MEM}"). Higher mem => lower k => '
+                        'faster hashing. A value of mem that is a power of 2 '
+                        'also optimizes filter update performance.')
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -463,6 +468,7 @@ def main() -> None:
     """
     args = parse_cmdargs(sys.argv[1:])
     reads = args.reads_per_template
+    mem = args.mem
     nitems = args.n_items
     fprate = args.fp_rate
     nworkers = args.workers
@@ -471,7 +477,7 @@ def main() -> None:
 
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
-    LOGGER.info(MSG_PARAMS, nitems, fprate, nworkers, batchsize)
+    LOGGER.info(MSG_PARAMS, mem, nitems, fprate, nworkers, batchsize)
     workq: 'SimpleQueue[str]' = SimpleQueue()
     outq: 'SimpleQueue[str]' = SimpleQueue()
     resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
@@ -484,7 +490,7 @@ def main() -> None:
         writer = Process(target=write_output, args=(outq, outfh))
         reader.start()
         writer.start()
-        bf = BloomFilter(smm, nitems, fprate)
+        bf = BloomFilter(smm, nitems, fprate, mem)
         workers = [
             Process(
                 target=markdups,

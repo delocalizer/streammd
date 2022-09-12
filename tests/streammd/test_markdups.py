@@ -425,9 +425,9 @@ class TestMarkDups(TestCase):
         with (RESOURCES.joinpath('test.paired_full.sam') as inf,
                 NamedTemporaryFile() as out):
             testargs = list(
-                map(str, ('streammd', '--paired', '--workers', 1,
-                          '--input', inf, '--output', out.name, '--metrics',
-                          '/dev/null', '-n', 1000000)))
+                map(str, ('streammd', '--workers', 1, '--input', inf,
+                    '--output', out.name, '--metrics', '/dev/null',
+                    '-n', 1000000)))
             with patch.object(sys, 'argv', testargs):
                 main()
             result = [
@@ -450,9 +450,9 @@ class TestMarkDups(TestCase):
                 NamedTemporaryFile() as out,
                 NamedTemporaryFile() as met):
             testargs = list(
-                map(str, ('streammd', '--paired', '--workers', 1,
-                          '--input', inf, '--output', out.name, '--metrics',
-                          met.name, '-n', 1000000)))
+                map(str, ('streammd', '--workers', 1, '--input', inf,
+                    '--output', out.name, '--metrics', met.name,
+                    '-n', 1000000)))
             outstr = io.StringIO()
             with (patch.object(sys, 'argv', testargs),
                     self.assertLogs('streammd.markdups', level='INFO') as log):
