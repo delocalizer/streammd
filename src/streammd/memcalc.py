@@ -14,7 +14,7 @@ def mem_calc(n: int, p: int) -> float:
     Returns approximate memory requirement in GB for n items and target maximum
     false positive rate p.
     """
-    m, _ = BloomFilter.optimal_m_k(n, p)
+    m, _ = BloomFilter.m_k_min(n, p)
     return m / 8 / 1024 ** 3
 
 

@@ -11,8 +11,9 @@ from typing import Callable, List, Optional, Tuple, TypedDict
 from bitarray import bitarray
 # tests as essentially the same speed as xxhash but much better distribution
 from farmhash import hash64withseed
+from humanfriendly import parse_size
 
-
+KMAX = 100
 LOGGER = logging.getLogger(__name__)
 PRIMES = [
     2, 3, 5, 7, 521, 11, 523, 13, 17, 19, 23, 29, 541, 31, 37, 41, 43, 47, 53,
@@ -44,24 +45,32 @@ class BloomFilter:
     A Bloom filter implementation.
     """
     default_n: int = int(1e9)
-    default_p: float = 1e-9
+    default_p: float = 1e-6
+    default_mem: str = '4GiB'
 
     def __init__(self,
                  smm: SharedMemoryManager,
                  n: int=default_n,
-                 p: float=default_p) -> None:
+                 p: float=default_p,
+                 mem: str=default_mem) -> None:
         """
         Args:
             smm: SharedMemoryManager instance.
             n: number of items to add (default=1e9).
             p: false positive rate when n items are added (default=1e-9).
+            mem: human-friendly mem size for the bitarray. If not given then
+                 the optimal (minimum) value for m that satisfies n and p
+                 will be used, at the cost of higher k (lower performance).
+                 A value that is a power of 2 will optimize bitarray update
+                 performance.
         """
         self.n, self.p = n, p
-        self.m, self.k = self.optimal_m_k(n, p)
-        self.hash = self.hasher(self.m, self.k)
+        self.m, self.k = self.m_k_mem(n, p, mem) if mem else self.m_k_min(n, p)
+        self.mpow2 = self.m & (self.m - 1) == 0
+        self.hash = self.hasher(self.m, self.k, self.mpow2)
 
         # set up memory
-        self.shm_bits = smm.SharedMemory( getsizeof(bitarray(self.m)))
+        self.shm_bits = smm.SharedMemory(getsizeof(bitarray(self.m)))
 
         # initialize
         self.bits = bitarray(buffer=self.shm_bits.buf)
@@ -76,10 +85,7 @@ class BloomFilter:
 
         Returns True if item is present, False otherwise.
         """
-        for pos in self.hash(item):
-            if self.bits[pos] == 0:
-                return False
-        return True
+        return all(self.bits[pos] for pos in self.hash(item))
 
     def __del__(self) -> None:
         """
@@ -158,7 +164,7 @@ class BloomFilter:
         instance.p = config.p
         instance.m = config.m
         instance.k = config.k
-        instance.hash = instance.hasher(instance.m, instance.k)
+        instance.hash = instance.hasher(instance.m, instance.k, instance.mpow2)
         instance.bits = bitarray(buffer=instance.shm_bits.buf)
         return instance
 
@@ -166,6 +172,7 @@ class BloomFilter:
     def hasher(cls,
                m: int,
                k: int,
+               mpow2: bool,
                seeds: Optional[List[int]]=None
                ) -> Callable[[bytes|str], List[int]]:
         """
@@ -180,14 +187,45 @@ class BloomFilter:
         """
         seeds = list(seeds) if seeds else sorted(list(PRIMES[:k]))
         assert len(seeds) == k
+
         def _hasher(item):
-            return [hash64withseed(item, seed) % m for seed in seeds]
+            if mpow2:
+                # faster but requires m is power of 2
+                return [hash64withseed(item, seed) & (m-1) for seed in seeds]
+            else:
+                return [hash64withseed(item, seed) % m for seed in seeds]
         return _hasher
 
     @classmethod
-    def optimal_m_k(cls, n: int, p: float) -> Tuple[int, int]:
+    def m_k_mem(cls, n: int, p: float, mem='4GiB') -> Tuple[int, int]:
         """
-        Return the optimal number of bits m and optimal number of hash
+        Return the number of bits m and number of hash functions k for a Bloom
+        filter containing n items with a false positive rate of p, where m will
+        occupy (approximately) mem bytes. Because k is highly dependent on
+        (m/n) around the memory-optimal value, even small increases in m can
+        result in significantly lower values for k and thus higher performance.
+
+        Args:
+            n: number of items to add.
+            p: desired false positive rate after n items are added.
+            mem: size of m in bytes in human-friendly form (default=4GiB).
+                 A value that is a power of 2 will optimize bitarray update
+                 performance.
+
+        Returns:
+            (m, k)
+        """
+        m = parse_size(mem) * 8
+        # no closed form estimate for k in this case, solve by evaluation
+        for k in range(1, KMAX+1):
+            if pow(1 - pow(1-1/m, k*n), k) < p:
+                return (m, k)
+        raise ValueError(f'No solution for n={n} p={p} mem={mem} k<={KMAX}')
+
+    @classmethod
+    def m_k_min(cls, n: int, p: float) -> Tuple[int, int]:
+        """
+        Return the memory-optimal number of bits m and number of hash
         functions k for a Bloom filter containing n items with a false
         positive rate of p.
 
