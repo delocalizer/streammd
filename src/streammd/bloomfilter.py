@@ -45,26 +45,23 @@ class BloomFilter:
     """
     A Bloom filter implementation.
     """
-    default_n: int = int(1e9)
-    default_p: float = 1e-6
-    default_mem: str = '4GiB'
 
     def __init__(self,
                  smm: SharedMemoryManager,
-                 n: int=default_n,
-                 p: float=default_p,
+                 n: int,
+                 p: float,
                  mem: Optional[str]=None,
                  seeds: Optional[Iterable[int]]=None) -> None:
         """
         Args:
             smm: SharedMemoryManager instance.
-            n: Number of items to add (default=1e9).
-            p: False positive rate when n items are added (default=1e-6).
-            mem: Human-friendly mem size for the bitarray. If None is
-                supplied then the optimal (minimum) value for m that satisfies
-                n and p will be used, probably at the cost of higher k (lower
-                performance). A value that is a power of 2 will optimize
-                bitarray update performance.
+            n: Number of items to add.
+            p: False positive rate when n items are added.
+            mem: Optional human-friendly mem size for the bitarray e.g. "4GiB".
+                A value of mem that is a power of 2 optimizes bitarray update
+                performance. If mem is not supplied then the optimal (minimum)
+                value for m that satisfies n and p will be used, at the cost
+                of higher k (lower performance).
             seeds: Optional iterable of seeds to use for the hash functions.
                 The iterable must contain at least k elements; only the first
                 k are used but as k is often not known in advance there is no
@@ -108,7 +105,7 @@ class BloomFilter:
         return instance
 
     @classmethod
-    def m_k_mem(cls, n: int, p: float, mem='4GiB') -> Tuple[int, int]:
+    def m_k_mem(cls, n: int, p: float, mem) -> Tuple[int, int]:
         """
         Return the number of bits m and number of hash functions k for a Bloom
         filter containing n items with a false positive rate of p, where m will
@@ -119,9 +116,8 @@ class BloomFilter:
         Args:
             n: Number of items to add.
             p: Desired false positive rate after n items are added.
-            mem: Size of m in bytes in human-friendly form (default=4GiB).
-                A value that is a power of 2 will optimize bitarray update
-                performance.
+            mem: Human-friendly mem size for the bitarray e.g. "4GiB". A value
+                that is a power of 2 optimizes bitarray update performance.
 
         Returns:
             (m, k)
@@ -198,7 +194,7 @@ class BloomFilter:
         Note:
         For the sake of speed, this implementation does not use locking and
         provides no guarantee of consistency across multiple threads or
-        processes accessing the shared memory. This potentially matters in
+        processes accessing the shared memory. This -potentially- matters in
         cases where the filter is being updated at the same time it is being
         used to check for membership, but even then the specific requirements
         of the application determine if it's a real problem. A couple of
