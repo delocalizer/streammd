@@ -78,7 +78,7 @@ class TestBloomFilter(TestCase):
             (1e9, 1e-06, 28755175133, 20),
         )
         for n, p, m_expected, k_expected in values:
-            m, k = BloomFilter.optimal_m_k(n, p)
+            m, k = BloomFilter.m_k_min(n, p)
             self.assertEqual(m, m_expected)
             self.assertEqual(k, k_expected)
 
