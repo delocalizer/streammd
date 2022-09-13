@@ -7,24 +7,28 @@ Input must begin with a valid SAM header, followed by qname-grouped records.
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
+from humanfriendly import format_size
 from importlib import metadata
 from multiprocessing import Process, SimpleQueue
 from multiprocessing.managers import SharedMemoryManager
-from typing import List, Literal, TextIO, Tuple, TypedDict
+from typing import List, Literal, Tuple, TypedDict
 import argparse
 import json
 import logging
 import os
 import re
 import sys
-from .bloomfilter import BloomFilter, BloomFilterConfig
+from .bloomfilter import BloomFilter, BloomFilterConfig, NoMemorySolution
+
+ROOTLOG = logging.getLogger()
+ROOTLOG.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+ROOTLOG.addHandler(logging.StreamHandler())
 
 LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
-LOGGER.addHandler(logging.StreamHandler())
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_LOGINTERVAL = 1000000
+DEFAULT_MEM = '4GiB'
 DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
 DEFAULT_NWORKERS = 2
@@ -32,7 +36,8 @@ DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
-MSG_PARAMS = 'n=%.2E; p=%.2E; nworkers=%s; batchsize=%s;'
+MSG_MEM = 'Running with minimum required memory %s'
+MSG_PARAMS = 'mem=%s; n=%.2E; p=%.2E; workers=%s; batchsize=%s;'
 MSG_NOHEADER = 'no header lines detected'
 MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
                  'single-end reads?')
@@ -172,15 +177,6 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
     Returns: Parsed arguments
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    templatereads = parser.add_mutually_exclusive_group(required=True)
-    templatereads.add_argument('--single',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=1)
-    templatereads.add_argument('--paired',
-                               dest='reads_per_template',
-                               action='store_const',
-                               const=2)
     parser.add_argument('--input',
                         default=0,
                         help='Input file (default=STDIN).')
@@ -191,6 +187,19 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_METRICS,
                         help=('Output metrics file '
                               f'(default={DEFAULT_METRICS}).'))
+    parser.add_argument('--single',
+                        dest='reads_per_template',
+                        action='store_const',
+                        help='Accept single-ended reads as input (default is '
+                        'paired-end).',
+                        const=1,
+                        default=2)
+    parser.add_argument('-m', '--mem',
+                        default=DEFAULT_MEM,
+                        help='Human-friendly byte size for the Bloom filter '
+                        f'(default="{DEFAULT_MEM}"). Higher mem => lower k => '
+                        'faster hashing. A value of mem that is a power of 2 '
+                        'also optimizes filter update performance.')
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -252,7 +261,7 @@ def pgline(last: str) -> str:
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
-def read_input(infh: TextIO,
+def read_input(inf: int|str,
                outq: SimpleQueue,
                workq: SimpleQueue,
                nworkers: int,
@@ -264,7 +273,7 @@ def read_input(infh: TextIO,
     Header lines are written directly to the output queue.
 
     Args:
-        infh: Input stream file handle for reading.
+        inf: Input stream file name or descriptor.
         outq: multiprocesing.Queue to put header.
         workq: SimpleQueue to put SAM records.
         nworkers: Number of workers.
@@ -289,35 +298,36 @@ def read_input(infh: TextIO,
     qname_last = None
     header = None
     headlines = []
-    for line in infh:
-        if header:
-            qname = line.partition('\t')[0]
-            if qname == qname_last:
-                qname_group.append(line)
+    with open(inf, 'rt', encoding='utf-8') as infh:
+        for line in infh:
+            if header:
+                qname = line.partition('\t')[0]
+                if qname == qname_last:
+                    qname_group.append(line)
+                else:
+                    n_qname += 1
+                    if n_qname % DEFAULT_LOGINTERVAL == 0:
+                        LOGGER.debug(MSG_NQNAMES, n_qname)
+                    batch.append(qname_group)
+                    batch_sz += 1
+                    if batch_sz == batchsize:
+                        workq.put(batch)
+                        batch = []
+                        batch_sz = 0
+                    qname_last = qname
+                    qname_group = [line]
+            elif line.startswith('@'):
+                headlines.append(line)
             else:
-                n_qname += 1
-                if n_qname % DEFAULT_LOGINTERVAL == 0:
-                    LOGGER.debug(MSG_NQNAMES, n_qname)
-                batch.append(qname_group)
-                batch_sz += 1
-                if batch_sz == batchsize:
-                    workq.put(batch)
-                    batch = []
-                    batch_sz = 0
-                qname_last = qname
+                if not headlines:
+                    raise ValueError(MSG_NOHEADER)
+                headlines.append(pgline(headlines[-1]))
+                header = ''.join(headlines)
+                outq.put(header)
+                qname_last = line.partition('\t')[0]
                 qname_group = [line]
-        elif line.startswith('@'):
-            headlines.append(line)
-        else:
-            if not headlines:
-                raise ValueError(MSG_NOHEADER)
-            headlines.append(pgline(headlines[-1]))
-            header = ''.join(headlines)
-            outq.put(header)
-            qname_last = line.partition('\t')[0]
-            qname_group = [line]
-    batch.append(qname_group)
-    workq.put(batch)
+        batch.append(qname_group)
+        workq.put(batch)
     for _ in range(nworkers):
         workq.put(SENTINEL)
 
@@ -402,13 +412,13 @@ def unmarkdup(record: List[str]) -> None:
             record.append(pg_new)
 
 
-def write_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
+def write_metrics(metrics: List[Metrics], metf: int|str) -> None:
     """
     Output aggregate metrics.
 
     Args:
         metrics: list of duplicate marking metrics from output queue.
-        metfh: Metrics file handle for writing.
+        metf: Metrics file name or descriptor.
     """
     agg = Metrics(
         ALIGNMENTS=sum(m['ALIGNMENTS'] for m in metrics),
@@ -428,33 +438,35 @@ def write_metrics(metrics: List[Metrics], metfh: TextIO) -> None:
                 agg['TEMPLATES_MARKED_DUPLICATE'])
     LOGGER.info(MSG_TEMPLATE_DUPLICATE_FRACTION,
                 agg['TEMPLATE_DUPLICATE_FRACTION'])
-    metfh.write(
-        # kludge to output rounded floats
-        # https://stackoverflow.com/a/29066406/6705037
-        json.dumps(
-            json.loads(
-                json.dumps(agg),
-                parse_float=lambda x: round(float(x), 4)),
-            indent=2,
-            sort_keys=True))
+    with open(metf, 'wt', encoding='utf-8') as metfh:
+        metfh.write(
+            # kludge to output rounded floats
+            # https://stackoverflow.com/a/29066406/6705037
+            json.dumps(
+                json.loads(
+                    json.dumps(agg),
+                    parse_float=lambda x: round(float(x), 4)),
+                indent=2,
+                sort_keys=True))
 
 
-def write_output(outq, outfh):
+def write_output(outq: SimpleQueue, out: int|str):
     """
-    Consume text items from outq and write them to outfh.
+    Consume text items from outq and write them to out.
 
     Args:
         outq: SimpleQueue to get header and processed qname groups of SAM
             records.
-        outfh: Output stream file handle for writing.
+        out: Output stream file name or descriptor.
 
     """
-    while True:
-        item = outq.get()
-        if item == SENTINEL:
-            outfh.flush()
-            break
-        outfh.write(item)
+    with open(out, 'wt', encoding='utf-8') as outfh:
+        while True:
+            item = outq.get()
+            if item == SENTINEL:
+                outfh.flush()
+                break
+            outfh.write(item)
 
 
 def main() -> None:
@@ -462,29 +474,37 @@ def main() -> None:
     Run as CLI script.
     """
     args = parse_cmdargs(sys.argv[1:])
+    inf = args.input
+    out = args.output
+    metf = args.metrics
     reads = args.reads_per_template
+    mem = args.mem
     nitems = args.n_items
     fprate = args.fp_rate
     nworkers = args.workers
     strip_previous = args.strip_previous
     batchsize = args.workq_batch_size
-
-    LOGGER.info(MSG_VERSION, VERSION)
-    LOGGER.info(' '.join(sys.argv))
-    LOGGER.info(MSG_PARAMS, nitems, fprate, nworkers, batchsize)
     workq: 'SimpleQueue[str]' = SimpleQueue()
     outq: 'SimpleQueue[str]' = SimpleQueue()
     resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
-    with (SharedMemoryManager() as smm,
-          open(args.input, 'rt', encoding='utf-8') as infh,
-          open(args.output, 'wt', encoding='utf-8') as outfh,
-          open(args.metrics, 'wt', encoding='utf-8') as metfh):
+
+    LOGGER.info(MSG_VERSION, VERSION)
+    LOGGER.info(' '.join(sys.argv))
+    LOGGER.info(MSG_PARAMS, mem, nitems, fprate, nworkers, batchsize)
+
+    with SharedMemoryManager() as smm:
         reader = Process(
-            target=read_input, args=(infh, outq, workq, nworkers, batchsize))
-        writer = Process(target=write_output, args=(outq, outfh))
+            target=read_input, args=(inf, outq, workq, nworkers, batchsize))
+        writer = Process(target=write_output, args=(outq, out))
         reader.start()
         writer.start()
-        bf = BloomFilter(smm, nitems, fprate)
+        try:
+            bf = BloomFilter(smm, nitems, fprate, mem)
+        except NoMemorySolution as nms:
+            LOGGER.warning(nms)
+            bf = BloomFilter(smm, nitems, fprate)
+            LOGGER.warning(MSG_MEM, format_size(bf.m // 8,
+                                                binary=(bf.m & (bf.m-1) == 0)))
         workers = [
             Process(
                 target=markdups,
@@ -497,7 +517,7 @@ def main() -> None:
         reader.join()
         writer.join()
         LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
-        write_metrics([resultq.get() for _ in range(nworkers)], metfh)
+        write_metrics([resultq.get() for _ in range(nworkers)], metf)
 
 
 if __name__ == '__main__':
