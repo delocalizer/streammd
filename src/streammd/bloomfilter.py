@@ -24,8 +24,14 @@ PRIMES = [
     401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487,
     491, 499, 503, 509
 ]
-MSG_INIT = 'BloomFilter initialized with n=%s, p=%s'
-MSG_NADDED_GT_N = 'approx number of added items %s now exceeds target: %s'
+MSG_INIT = 'BloomFilter initialized with n=%s, p=%s, m=%s, k=%s'
+MSG_NOMEM = 'No solution for mem=%s with n=%s p=%s k<=%s'
+
+
+class NoMemorySolution(ValueError):
+    """
+    Raise when target n, p cannot bet met with the memory specification.
+    """
 
 
 @dataclass
@@ -57,19 +63,22 @@ class BloomFilter:
             smm: SharedMemoryManager instance.
             n: Number of items to add.
             p: False positive rate when n items are added.
-            mem: Optional human-friendly mem size for the bitarray e.g. "4GiB".
-                A value of mem that is a power of 2 optimizes bitarray update
-                performance. If mem is not supplied then the optimal (minimum)
-                value for m that satisfies n and p will be used, at the cost
-                of higher k (lower performance).
+            mem: Optional human-friendly byte size for the bitarray e.g.
+                "4GiB". A value of mem that is a power of 2 optimizes bitarray
+                update performance. If mem is not supplied then the optimal
+                (minimum) value for m that satisfies n and p will be used,
+                usually at the cost of higher k (lower performance).
+                NoMemorySolution is raised if the target n and p cannot be
+                achieved with the requested mem.
             seeds: Optional iterable of seeds to use for the hash functions.
                 The iterable must contain at least k elements; only the first
                 k are used but as k is often not known in advance there is no
                 upper limit on the number that may be supplied. If seeds are
                 not supplied the first k primes are used.
         """
-        self.n, self.p = n, p
-        self.m, self.k = self.m_k_mem(n, p, mem) if mem else self.m_k_min(n, p)
+        self.n, self.p = int(n), p
+        self.m, self.k = (self.m_k_mem(self.n, self.p, mem) if mem else
+                          self.m_k_min(self.n, self.p))
         self.seeds = list(seeds)[:self.k] if seeds else PRIMES[:self.k]
         assert len(self.seeds) == self.k
         self.hash = self._hasher()
@@ -80,6 +89,7 @@ class BloomFilter:
         # initialize
         self.bits = bitarray(buffer=self.shm_bits.buf)
         self.bits[:] = 0
+        LOGGER.info(MSG_INIT, self.n, self.p, self.m, self.k)
 
     @classmethod
     def copy(cls, config: BloomFilterConfig) -> 'BloomFilter':
@@ -105,19 +115,22 @@ class BloomFilter:
         return instance
 
     @classmethod
-    def m_k_mem(cls, n: int, p: float, mem) -> Tuple[int, int]:
+    def m_k_mem(cls, n: int, p: float, mem: str) -> Tuple[int, int]:
         """
         Return the number of bits m and number of hash functions k for a Bloom
-        filter containing n items with a false positive rate of p, where m will
-        occupy (approximately) mem bytes. Because k is highly dependent on
-        (m/n) around the memory-optimal value, even small increases in m can
-        result in significantly lower values for k and thus higher performance.
+        filter containing n items with a false positive rate of p, where m
+        will occupy (approximately) mem bytes. For fixed n and p, k is highly
+        sensitive to m around the memory-optimal value, and even a slightly
+        higher value for m can result in a significantly lower value for k and
+        thus higher performance.
 
         Args:
             n: Number of items to add.
             p: Desired false positive rate after n items are added.
-            mem: Human-friendly mem size for the bitarray e.g. "4GiB". A value
-                that is a power of 2 optimizes bitarray update performance.
+            mem: Human-friendly byte size for the bitarray e.g. "4GiB". A
+                value that is a power of 2 optimizes bitarray update
+                performance. NoMemorySolution is raised if the target n and p
+                cannot be achieved with the requested mem.
 
         Returns:
             (m, k)
@@ -127,7 +140,7 @@ class BloomFilter:
         for k in range(1, KMAX+1):
             if pow(1 - pow(1-1/m, k*n), k) < p:
                 return (m, k)
-        raise ValueError(f'No solution for n={n} p={p} mem={mem} k<={KMAX}')
+        raise NoMemorySolution(MSG_NOMEM % (mem, n, p, KMAX))
 
     @classmethod
     def m_k_min(cls, n: int, p: float) -> Tuple[int, int]:
@@ -237,6 +250,9 @@ class BloomFilter:
         mask = m - 1 if self.mpow2 else None
 
         def _hasher_msk(item):
+            """
+            Faster than mod but can only use when m is a power of 2
+            """
             return [hash64withseed(item, seed) & mask for seed in seeds]
 
         def _hasher_mod(item):

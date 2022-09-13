@@ -7,6 +7,7 @@ Input must begin with a valid SAM header, followed by qname-grouped records.
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
+from humanfriendly import format_size
 from importlib import metadata
 from multiprocessing import Process, SimpleQueue
 from multiprocessing.managers import SharedMemoryManager
@@ -17,11 +18,13 @@ import logging
 import os
 import re
 import sys
-from .bloomfilter import BloomFilter, BloomFilterConfig
+from .bloomfilter import BloomFilter, BloomFilterConfig, NoMemorySolution
+
+ROOTLOG = logging.getLogger()
+ROOTLOG.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+ROOTLOG.addHandler(logging.StreamHandler())
 
 LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
-LOGGER.addHandler(logging.StreamHandler())
 
 DEFAULT_FPRATE = 1e-6
 DEFAULT_LOGINTERVAL = 1000000
@@ -33,6 +36,7 @@ DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
+MSG_MEM = 'Running with minimum required memory %s'
 MSG_PARAMS = 'mem=%s; n=%.2E; p=%.2E; workers=%s; batchsize=%s;'
 MSG_NOHEADER = 'no header lines detected'
 MSG_NOTSINGLE = ('%s: expected 1 primary alignment, got %s. Input is not '
@@ -190,9 +194,9 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         'paired-end).',
                         const=1,
                         default=2)
-    parser.add_argument('-b', '--mem',
+    parser.add_argument('-m', '--mem',
                         default=DEFAULT_MEM,
-                        help='Human-friendly mem size for the Bloom filter '
+                        help='Human-friendly byte size for the Bloom filter '
                         f'(default="{DEFAULT_MEM}"). Higher mem => lower k => '
                         'faster hashing. A value of mem that is a power of 2 '
                         'also optimizes filter update performance.')
@@ -257,7 +261,7 @@ def pgline(last: str) -> str:
     return '\t'.join(['@PG'] + tags) + '\n'
 
 
-def read_input(inf: str|int,
+def read_input(inf: int|str,
                outq: SimpleQueue,
                workq: SimpleQueue,
                nworkers: int,
@@ -408,7 +412,7 @@ def unmarkdup(record: List[str]) -> None:
             record.append(pg_new)
 
 
-def write_metrics(metrics: List[Metrics], metf: str|int) -> None:
+def write_metrics(metrics: List[Metrics], metf: int|str) -> None:
     """
     Output aggregate metrics.
 
@@ -446,7 +450,7 @@ def write_metrics(metrics: List[Metrics], metf: str|int) -> None:
                 sort_keys=True))
 
 
-def write_output(outq: SimpleQueue, out: str|int):
+def write_output(outq: SimpleQueue, out: int|str):
     """
     Consume text items from outq and write them to out.
 
@@ -494,7 +498,13 @@ def main() -> None:
         writer = Process(target=write_output, args=(outq, out))
         reader.start()
         writer.start()
-        bf = BloomFilter(smm, nitems, fprate, mem)
+        try:
+            bf = BloomFilter(smm, nitems, fprate, mem)
+        except NoMemorySolution as nms:
+            LOGGER.warning(nms)
+            bf = BloomFilter(smm, nitems, fprate)
+            LOGGER.warning(MSG_MEM, format_size(bf.m // 8,
+                                                binary=(bf.m & (bf.m-1) == 0)))
         workers = [
             Process(
                 target=markdups,
