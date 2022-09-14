@@ -503,8 +503,7 @@ def main() -> None:
         except NoMemorySolution as nms:
             LOGGER.warning(nms)
             bf = BloomFilter(smm, nitems, fprate)
-            LOGGER.warning(MSG_MEM, format_size(bf.m // 8,
-                                                binary=(bf.m & (bf.m-1) == 0)))
+            LOGGER.warning(MSG_MEM, format_size(bf.m // 8, binary=bf.mpow2))
         workers = [
             Process(
                 target=markdups,
