@@ -1,5 +1,9 @@
 """
 A Bloom filter implementation.
+
+Or should I say, "yet another...". I justify this one with the fact that it's
+pretty fast, and usable with shared memory in multiprocessing applications
+thanks to bitarray's memoryview interface.
 """
 import logging
 from dataclasses import dataclass
@@ -7,25 +11,19 @@ from math import ceil, log
 from multiprocessing.shared_memory import SharedMemory
 from multiprocessing.managers import SharedMemoryManager
 from sys import getsizeof
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 from bitarray import bitarray
-# tests as essentially the same speed as xxhash but much better distribution
+# tests as essentially the same speed as xxhash but better distribution
 from farmhash import hash64withseed
 from humanfriendly import parse_size
 
 KMAX = 100
 LOGGER = logging.getLogger(__name__)
-PRIMES = [
-    2, 3, 5, 7, 521, 11, 523, 13, 17, 19, 23, 29, 541, 31, 37, 41, 43, 47, 53,
-    59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137,
-    139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223,
-    227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307,
-    311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397,
-    401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487,
-    491, 499, 503, 509
-]
 MSG_INIT = 'BloomFilter initialized with n=%s, p=%s, m=%s, k=%s'
 MSG_NOMEM = 'No solution for mem=%s with n=%s p=%s k<=%s'
+# any 2 primes should do
+SEED1 = 43
+SEED2 = 9967
 
 
 class NoMemorySolution(ValueError):
@@ -44,7 +42,6 @@ class BloomFilterConfig:
     p: float
     m: int
     k: int
-    seeds: List[int]
 
 
 class BloomFilter:
@@ -56,8 +53,7 @@ class BloomFilter:
                  smm: SharedMemoryManager,
                  n: int,
                  p: float,
-                 mem: Optional[str]=None,
-                 seeds: Optional[Iterable[int]]=None) -> None:
+                 mem: Optional[str]=None) -> None:
         """
         Args:
             smm: SharedMemoryManager instance.
@@ -70,17 +66,10 @@ class BloomFilter:
                 usually at the cost of higher k (lower performance).
                 NoMemorySolution is raised if the target n and p cannot be
                 achieved with the requested mem.
-            seeds: Optional iterable of seeds to use for the hash functions.
-                The iterable must contain at least k elements; only the first
-                k are used but as k is often not known in advance there is no
-                upper limit on the number that may be supplied. If seeds are
-                not supplied the first k primes are used.
         """
         self.n, self.p = int(n), p
         self.m, self.k = (self.m_k_mem(self.n, self.p, mem) if mem else
                           self.m_k_min(self.n, self.p))
-        self.seeds = list(seeds)[:self.k] if seeds else PRIMES[:self.k]
-        assert len(self.seeds) == self.k
         self.hash = self._hasher()
 
         # set up memory
@@ -109,7 +98,6 @@ class BloomFilter:
         instance.p = config.p
         instance.m = config.m
         instance.k = config.k
-        instance.seeds = config.seeds
         instance.hash = instance._hasher()
         instance.bits = bitarray(buffer=instance.shm_bits.buf)
         return instance
@@ -186,7 +174,7 @@ class BloomFilter:
         Returns configuration for this instance.
         """
         return BloomFilterConfig(
-                self.shm_bits.name, self.n, self.p, self.m, self.k, self.seeds)
+                self.shm_bits.name, self.n, self.p, self.m, self.k)
 
     @property
     def mpow2(self) -> bool:
@@ -212,51 +200,48 @@ class BloomFilter:
         used to check for membership, but even then the specific requirements
         of the application determine if it's a real problem. A couple of
         practical matters to consider:
-        1. Much more time is spent in the hash and modulus functions than in
-           getting/setting bits.
-        2. Fewer threads = less of an issue.
-        3. Randomly and infrequently distributed duplicates in the inputs =
+        1. Fewer threads/processes = less of an issue.
+        2. Randomly and infrequently distributed duplicates in the inputs =
            less of an issue.
-        If in doubt tests should be run with real data to check if the
-        behaviour of this implementation is acceptable. My testing showed that
-        using multiprocessing.Lock slowed performance by about 20x.
+        If in doubt tests should be run using real data for your application
+        to check if the behaviour of this implementation is acceptable.
         """
         added = False
         for pos in self.hash(item):
-            if self.bits[pos] == 0:
-                added = True
-                self.bits[pos] = 1
+            if not self.bits[pos]:
+                self.bits[pos] = added = True
         return added
 
     def count(self) -> int:
         """
         Return the approximate number of items stored.
 
-        Ref: Swamidass & Baldi (2007)
+        Ref: Swamidass & Baldi (2007) https://doi.org/10.1021/ci600358f
         """
-        # Implementation note:
-        # Using xxhash.xxh3_64_intdigest instead of farmhash in hasher(...)
-        # produces a poor result from this approximation: sometimes ~ 20% away
-        # from the real value. This suggests it isn't well distributed.
         return ceil((-self.m/self.k) * log(1 - (self.bits.count(1)/self.m)))
 
     def _hasher(self) -> Callable[[bytes|str], List[int]]:
         """
         Return a function that hashes to k independent integer outputs of
         size m.
+
+        k linear combinations of just 2 independent hashes has the same
+        asymptotic behaviour as k independent hashes.
+
+        Ref: Kirsch & Mitzenmacher (2006) https://doi.org/10.1007/11841036_42
         """
-        # locals for performance
-        m, seeds = self.m, self.seeds
+        m, ks = self.m, tuple(range(self.k))
         mask = m - 1 if self.mpow2 else None
 
-        def _hasher_msk(item):
-            """
-            Faster than mod but can only use when m is a power of 2
-            """
-            return [hash64withseed(item, seed) & mask for seed in seeds]
+        def _hasher_mod(u):
+            h1 = hash64withseed(u, SEED1)
+            h2 = hash64withseed(u, SEED2)
+            return [(h1 + i*h2) % m for i in ks]
 
-        def _hasher_mod(item):
-            return [hash64withseed(item, seed) % m for seed in seeds]
+        def _hasher_msk(u):
+            h1 = hash64withseed(u, SEED1)
+            h2 = hash64withseed(u, SEED2)
+            return [(h1 + i*h2) & mask for i in ks]
 
         if self.mpow2:
             return _hasher_msk

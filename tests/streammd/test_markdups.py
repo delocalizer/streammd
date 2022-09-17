@@ -26,8 +26,7 @@ from streammd.markdups import (DEFAULT_FPRATE,
                                main,
                                markdups,
                                pgline,
-                               readends,
-                               write_output)
+                               readends)
 
 RESOURCES = files('tests.streammd.resources')
 
@@ -42,22 +41,22 @@ class TestMarkDups(TestCase):
         Confirm that ValueError is raised if SAM file input lacks header.
         """
         nworkers = 1
-        outq = SimpleQueue()
         workq = SimpleQueue()
         inf = RESOURCES.joinpath('no_header.sam')
-        with self.assertRaises(ValueError, msg=MSG_NOHEADER):
-            read_input(inf, outq, workq, nworkers)
+        with (self.assertRaises(ValueError, msg=MSG_NOHEADER),
+                NamedTemporaryFile('wt') as out):
+            read_input(inf, out.name, workq, nworkers)
 
     def test_read_input_batch_and_enqueue(self):
         """
         Confirm that SAM file records are written to workq in batched groups as
-        expected and header is written to outq.
+        expected.
         """
         nworkers = 2
-        outq = SimpleQueue()
         workq = SimpleQueue()
         inf = RESOURCES.joinpath('6_good_records.sam')
-        read_input(inf, outq, workq, nworkers)
+        with NamedTemporaryFile('wt') as out:
+            read_input(inf, out.name, workq, nworkers)
         # One batch (3 QNAME groups < batchsize) + one sentinel per consumer.
         batch = workq.get()
         for _ in range(nworkers):
@@ -67,9 +66,6 @@ class TestMarkDups(TestCase):
         self.assertEqual(len(batch), 3)
         for group in batch:
             self.assertEqual(len(group), 2)
-        # one header in outq
-        header = outq.get()
-        self.assertTrue(outq.empty())
 
     def test_pgline_1(self):
         """
@@ -238,14 +234,14 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         inf = RESOURCES.joinpath('not_paired.sam')
-        with SharedMemoryManager() as smm:
-            read_input(inf, outq, workq, nworkers)
+        with (SharedMemoryManager() as smm,
+                NamedTemporaryFile('wt') as out):
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             with self.assertRaises(ValueError, msg=MSG_NOTPAIRED):
-                markdups(bf.config, workq, outq, resultq, 2)
+                markdups(bf.config, workq, out.name, resultq, 2)
 
     def test_markdups_notsingle(self):
         """
@@ -254,14 +250,14 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         inf = RESOURCES.joinpath('not_single.sam')
-        with SharedMemoryManager() as smm:
-            read_input(inf, outq, workq, nworkers)
+        with (SharedMemoryManager() as smm,
+                NamedTemporaryFile('wt') as out):
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
             with self.assertRaises(ValueError, msg=MSG_NOTSINGLE):
-                markdups(bf.config, workq, outq, resultq, 1)
+                markdups(bf.config, workq, out.name, resultq, 1)
 
     def test_markdups_3(self):
         """
@@ -269,7 +265,6 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         expected = [
             (alignment.qname, alignment.flag) for alignment in
@@ -277,11 +272,9 @@ class TestMarkDups(TestCase):
         inf = RESOURCES.joinpath('test.single.sam')
         with (SharedMemoryManager() as smm,
                 NamedTemporaryFile('wt') as out):
-            read_input(inf, outq, workq, nworkers)
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
-            markdups(bf.config, workq, outq, resultq, 1)
-            outq.put(SENTINEL)
-            write_output(outq, out.name)
+            markdups(bf.config, workq, out.name, resultq, 1)
             counts = resultq.get()
             self.assertEqual(counts['TEMPLATES'], 4)
             self.assertEqual(counts['TEMPLATES_MARKED_DUPLICATE'], 1)
@@ -297,7 +290,6 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         expected = [
             (alignment.qname, alignment.flag) for alignment in
@@ -305,11 +297,9 @@ class TestMarkDups(TestCase):
         inf = RESOURCES.joinpath('test.paired.sam')
         with (SharedMemoryManager() as smm,
                 NamedTemporaryFile('wt') as out):
-            read_input(inf, outq, workq, nworkers)
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
-            markdups(bf.config, workq, outq, resultq, 2)
-            outq.put(SENTINEL)
-            write_output(outq, out.name)
+            markdups(bf.config, workq, out.name, resultq, 2)
             counts = resultq.get()
             self.assertEqual(counts['TEMPLATES'], 2)
             self.assertEqual(counts['TEMPLATES_MARKED_DUPLICATE'], 1)
@@ -327,7 +317,6 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         expected = [
             ('HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678', 77),
@@ -335,11 +324,9 @@ class TestMarkDups(TestCase):
         inf = RESOURCES.joinpath('test.unmapped.sam')
         with (SharedMemoryManager() as smm,
                 NamedTemporaryFile('wt') as out):
-            read_input(inf, outq, workq, nworkers)
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
-            markdups(bf.config, workq, outq, resultq, 2)
-            outq.put(SENTINEL)
-            write_output(outq, out.name)
+            markdups(bf.config, workq, out.name, resultq, 2)
             counts = resultq.get()
             self.assertEqual(counts['TEMPLATES'], 1)
             self.assertEqual(counts['TEMPLATES_MARKED_DUPLICATE'], 0)
@@ -357,16 +344,13 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         inf = RESOURCES.joinpath('test.previousdup.sam')
         with (SharedMemoryManager() as smm,
                 NamedTemporaryFile('wt') as out):
-            read_input(inf, outq, workq, nworkers)
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
-            markdups(bf.config, workq, outq, resultq, 1)
-            outq.put(SENTINEL)
-            write_output(outq, out.name)
+            markdups(bf.config, workq, out.name, resultq, 1)
             result = [(alignment.flag, alignment.get_tag('PG'))
                       for alignment in AlignmentFile(out.name)]
             self.assertEqual(result[0], (1024, 'MarkDuplicates'))  # previous
@@ -379,16 +363,13 @@ class TestMarkDups(TestCase):
         """
         nworkers = 1
         workq = SimpleQueue()
-        outq = SimpleQueue()
         resultq = SimpleQueue()
         inf = RESOURCES.joinpath('test.previousdup.sam')
         with (SharedMemoryManager() as smm,
                 NamedTemporaryFile('wt') as out):
-            read_input(inf, outq, workq, nworkers)
+            read_input(inf, out.name, workq, nworkers)
             bf = BloomFilter(smm, 100, DEFAULT_FPRATE)
-            markdups(bf.config, workq, outq, resultq, 1, True)
-            outq.put(SENTINEL)
-            write_output(outq, out.name)
+            markdups(bf.config, workq, out.name, resultq, 1, True)
             result = [(alignment.flag, alignment.get_tag('PG'))
                       for alignment in AlignmentFile(out.name)]
             self.assertEqual(result[0], (0, PGID))     # updated
@@ -422,7 +403,7 @@ class TestMarkDups(TestCase):
             testargs = list(
                 map(str, ('streammd', '--workers', 1, '--input', inf,
                     '--output', out.name, '--metrics', '/dev/null',
-                    '-n', 1000000)))
+                    '-n', 1000000, '-m', '4MiB')))
             with patch.object(sys, 'argv', testargs):
                 main()
             result = [

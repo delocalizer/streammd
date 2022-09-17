@@ -9,7 +9,7 @@ environment variable.
 """
 from humanfriendly import format_size
 from importlib import metadata
-from multiprocessing import Process, SimpleQueue
+from multiprocessing import Lock, Process, SimpleQueue
 from multiprocessing.managers import SharedMemoryManager
 from typing import List, Literal, Tuple, TypedDict
 import argparse
@@ -67,6 +67,7 @@ SENTINEL = 'STOP'
 DEL = b'\x7F'.decode('ascii')
 UNMAPPED = (DEL, 0, '')
 VERSION = metadata.version(PGID)
+WRITELOCK = Lock()
 
 
 class Metrics(TypedDict, total=False):
@@ -104,7 +105,7 @@ def markdup(record: List[str]) -> None:
 
 def markdups(bfconfig: BloomFilterConfig,
              workq: SimpleQueue,
-             outq: SimpleQueue,
+             outf: int|str,
              resultq: SimpleQueue,
              reads_per_template: Literal[1, 2],
              strip_previous: bool=False) -> None:
@@ -114,7 +115,7 @@ def markdups(bfconfig: BloomFilterConfig,
     Args:
         bfconfig: Bloom filter configuration dict.
         workq: SimpleQueue to get batches of qname grouped SAM records.
-        outq: SimpleQueue to put processed SAM records.
+        outf: Onput stream file name or descriptor.
         resultq: SimpleQueue to put metrics.
         reads_per_template: 1 or 2.
         strip_previous: unset duplicate flag bit for any reads that have it
@@ -134,36 +135,38 @@ def markdups(bfconfig: BloomFilterConfig,
     """
     bf = BloomFilter.copy(bfconfig)
     n_tpl, n_tpl_dup, n_aln, n_aln_dup = 0, 0, 0, 0
-    while True:
-        batch = workq.get()
-        outlines = []
-        if batch == SENTINEL:
-            break
-        for group in batch:
-            n_tpl += 1
-            n_aln += len(group)
-            qnamegrp = [r.strip().split('\t') for r in group]
-            ends = readends(qnamegrp)
-            if len(ends) != reads_per_template:
-                errmsg = (MSG_NOTSINGLE if reads_per_template == 1 else
-                          MSG_NOTPAIRED)
-                raise ValueError(errmsg % (qnamegrp[0][0], len(ends)))
-            ends_str = ''.join([f'{end[0]}_{end[1]}{end[2]}' for end in ends])
-            # sort order => if 1st is unmapped, all are
-            if ends[0] == UNMAPPED:
-                pass
-            # ends already seen => dupe
-            elif not bf.add(ends_str):
-                n_tpl_dup += 1
+    with open(outf, 'at') as outfh:
+        while True:
+            batch = workq.get()
+            outlines = []
+            if batch == SENTINEL:
+                break
+            for group in batch:
+                n_tpl += 1
+                n_aln += len(group)
+                qnamegrp = [r.strip().split('\t') for r in group]
+                ends = readends(qnamegrp)
+                if len(ends) != reads_per_template:
+                    errmsg = (MSG_NOTSINGLE if reads_per_template == 1 else
+                              MSG_NOTPAIRED)
+                    raise ValueError(errmsg % (qnamegrp[0][0], len(ends)))
+                ends_str = ''.join([f'{end[0]}_{end[1]}{end[2]}' for end in ends])
+                # sort order => if 1st is unmapped, all are
+                if ends[0] == UNMAPPED:
+                    pass
+                # ends already seen => dupe
+                elif not bf.add(ends_str):
+                    n_tpl_dup += 1
+                    for read in qnamegrp:
+                        markdup(read)
+                        n_aln_dup += 1
+                elif strip_previous:
+                    for read in qnamegrp:
+                        unmarkdup(read)
                 for read in qnamegrp:
-                    markdup(read)
-                    n_aln_dup += 1
-            elif strip_previous:
-                for read in qnamegrp:
-                    unmarkdup(read)
-            for read in qnamegrp:
-                outlines.append('\t'.join(read))
-        outq.put('\n'.join(outlines) + '\n')
+                    outlines.append('\t'.join(read))
+            with WRITELOCK:
+                outfh.write('\n'.join(outlines) + '\n')
     resultq.put(Metrics({
         'TEMPLATES':                   n_tpl,
         'TEMPLATES_MARKED_DUPLICATE':  n_tpl_dup,
@@ -262,10 +265,10 @@ def pgline(last: str) -> str:
 
 
 def read_input(inf: int|str,
-               outq: SimpleQueue,
+               outf: int|str,
                workq: SimpleQueue,
                nworkers: int,
-               batchsize: int=500) -> None:
+               batchsize: int=60) -> None:
     """
     Read records from a qname-grouped SAM file input stream and enqueue them
     for processing in batches.
@@ -274,7 +277,7 @@ def read_input(inf: int|str,
 
     Args:
         inf: Input stream file name or descriptor.
-        outq: multiprocesing.Queue to put header.
+        outq: Output stream file name or descriptor.
         workq: SimpleQueue to put SAM records.
         nworkers: Number of workers.
         batchsize: Number of qnames per batch put into the workq (default=500).
@@ -323,7 +326,8 @@ def read_input(inf: int|str,
                     raise ValueError(MSG_NOHEADER)
                 headlines.append(pgline(headlines[-1]))
                 header = ''.join(headlines)
-                outq.put(header)
+                with open(outf, 'wt') as outfh:
+                    outfh.write(header)
                 qname_last = line.partition('\t')[0]
                 qname_group = [line]
         batch.append(qname_group)
@@ -450,25 +454,6 @@ def write_metrics(metrics: List[Metrics], metf: int|str) -> None:
                 sort_keys=True))
 
 
-def write_output(outq: SimpleQueue, out: int|str):
-    """
-    Consume text items from outq and write them to out.
-
-    Args:
-        outq: SimpleQueue to get header and processed qname groups of SAM
-            records.
-        out: Output stream file name or descriptor.
-
-    """
-    with open(out, 'wt', encoding='utf-8') as outfh:
-        while True:
-            item = outq.get()
-            if item == SENTINEL:
-                outfh.flush()
-                break
-            outfh.write(item)
-
-
 def main() -> None:
     """
     Run as CLI script.
@@ -485,7 +470,6 @@ def main() -> None:
     strip_previous = args.strip_previous
     batchsize = args.workq_batch_size
     workq: 'SimpleQueue[str]' = SimpleQueue()
-    outq: 'SimpleQueue[str]' = SimpleQueue()
     resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
 
     LOGGER.info(MSG_VERSION, VERSION)
@@ -494,10 +478,8 @@ def main() -> None:
 
     with SharedMemoryManager() as smm:
         reader = Process(
-            target=read_input, args=(inf, outq, workq, nworkers, batchsize))
-        writer = Process(target=write_output, args=(outq, out))
+            target=read_input, args=(inf, out, workq, nworkers, batchsize))
         reader.start()
-        writer.start()
         try:
             bf = BloomFilter(smm, nitems, fprate, mem)
         except NoMemorySolution as nms:
@@ -507,14 +489,12 @@ def main() -> None:
         workers = [
             Process(
                 target=markdups,
-                args=(bf.config, workq, outq, resultq, reads, strip_previous))
+                args=(bf.config, workq, out, resultq, reads, strip_previous))
             for _ in range(nworkers)
         ]
         list(map(lambda x: x.start(), workers))
         list(map(lambda x: x.join(), workers))
-        outq.put(SENTINEL)
         reader.join()
-        writer.join()
         LOGGER.info(MSG_UNIQUE_ITEMS_APPROXIMATE, bf.count())
         write_metrics([resultq.get() for _ in range(nworkers)], metf)
 
