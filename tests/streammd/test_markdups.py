@@ -403,7 +403,7 @@ class TestMarkDups(TestCase):
             testargs = list(
                 map(str, ('streammd', '--workers', 1, '--input', inf,
                     '--output', out.name, '--metrics', '/dev/null',
-                    '-n', 1000000, '-m', '4MiB')))
+                    '-n', 1000000, '-s', '4MiB')))
             with patch.object(sys, 'argv', testargs):
                 main()
             result = [

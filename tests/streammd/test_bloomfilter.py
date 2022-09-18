@@ -108,5 +108,5 @@ class TestBloomFilter(TestCase):
                 for value in values:
                     bf.add(value)
                 fpr = sum(test in bf for test in misses) / len(misses)
-                print(n, p, fpr)
-                #self.assertLessEqual(fpr, p)
+                # FPR less or within 20% of expected
+                self.assertLessEqual(fpr/p, 1.2)

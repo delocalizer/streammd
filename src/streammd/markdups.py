@@ -7,8 +7,9 @@ Input must begin with a valid SAM header, followed by qname-grouped records.
 Default log level is 'INFO' — set to something else with the LOG_LEVEL
 environment variable.
 """
-from humanfriendly import format_size
+from humanfriendly import format_size, parse_size
 from importlib import metadata
+from math import ceil, log2
 from multiprocessing import Lock, Process, SimpleQueue
 from multiprocessing.managers import SharedMemoryManager
 from typing import List, Literal, Tuple, TypedDict
@@ -26,13 +27,13 @@ ROOTLOG.addHandler(logging.StreamHandler())
 
 LOGGER = logging.getLogger(__name__)
 
+MEM_CHOICES = ('min', 'perf1', 'perf2')
 DEFAULT_FPRATE = 1e-6
 DEFAULT_LOGINTERVAL = 1000000
-DEFAULT_MEM = '4GiB'
+DEFAULT_MEM = 'perf1'
 DEFAULT_METRICS = 'streammd-metrics.json'
 DEFAULT_NITEMS = 1e9
 DEFAULT_NWORKERS = 2
-DEFAULT_WORKQBATCHSIZE = 500
 
 MSG_ALIGNMENTS = 'alignments seen: %s'
 MSG_ALIGNMENTS_MARKED_DUPLICATE = 'alignments marked duplicate: %s'
@@ -175,6 +176,23 @@ def markdups(bfconfig: BloomFilterConfig,
     }))
 
 
+def mem_heuristic(n: int , p: float,
+                  heuristic: Literal['min', 'perf1', 'perf2']) -> None|str:
+    """
+    Return memory from n, p, and heuristic setting.
+    """
+    mmin, kmin = BloomFilter.m_k_min(n, p)
+    if heuristic == 'min':
+        return None
+    if heuristic == 'perf1':
+        # next power of 2 above mmin
+        return f'{2 ** (ceil(log2(mmin)) - 23)}MiB'
+    if heuristic == 'perf2':
+        # next power of 2 above perf1 
+        return f'{2 ** (ceil(log2(mmin)) - 22)}MiB'
+    raise NotImplementedError(heuristic)
+
+
 def parse_cmdargs(args: List[str]) -> argparse.Namespace:
     """
     Returns: Parsed arguments
@@ -197,12 +215,6 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         'paired-end).',
                         const=1,
                         default=2)
-    parser.add_argument('-m', '--mem',
-                        default=DEFAULT_MEM,
-                        help='Human-friendly byte size for the Bloom filter '
-                        f'(default="{DEFAULT_MEM}"). Higher mem => lower k => '
-                        'faster hashing. A value of mem that is a power of 2 '
-                        'also optimizes filter update performance.')
     parser.add_argument('-n', '--n-items',
                         type=int,
                         default=DEFAULT_NITEMS,
@@ -213,6 +225,22 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                         default=DEFAULT_FPRATE,
                         help=('Target maximum false positive rate when n items '
                               f'are stored (default={DEFAULT_FPRATE:.2E}).'))
+    memgrp = parser.add_mutually_exclusive_group()
+    memgrp.add_argument('-m', '--mem',
+                        choices=MEM_CHOICES,
+                        default=DEFAULT_MEM,
+                        help='Specify memory using a heuristic (default='
+                        f'"{DEFAULT_MEM}"). "min" requires the most hashes '
+                        'and is the slowest. "perf1" and "perf2" require '
+                        'progressively fewer hashes and achieve higher '
+                        'processing speed at the price of more memory.')
+    memgrp.add_argument('-s', '--mem-sz',
+                        type=str,
+                        help='Specify an exact amount of memory to use, '
+                        'in human-friendly units eg. "4GiB". If the target '
+                        'FP_RATE rate for the given N_ITEMS cannot be '
+                        'achieved with this amount, a warning is logged and '
+                        'the tool runs with the minimum memory setting.')
     parser.add_argument('-w', '--workers',
                         type=int,
                         default=DEFAULT_NWORKERS,
@@ -228,14 +256,13 @@ def parse_cmdargs(args: List[str]) -> argparse.Namespace:
                               'strongly recommended for sensible results.'))
     parser.add_argument('--workq-batch-size',
                         type=int,
-                        default=DEFAULT_WORKQBATCHSIZE,
+                        default=None,
                         help=('Specify the number of SAM records in each '
-                              'batch for the work queue '
-                              f'(default={DEFAULT_WORKQBATCHSIZE}). '
-                              'The default value performs well in most cases; '
-                              'adjustments for SAM record size and number of '
-                              'worker processes may yield small performance '
-                              'improvements.'))
+                              'batch for the work queue. If not supplied, '
+                              'the heuristic max(140//nworkers, 20) is used. '
+                              'Empirically this works well for 1 <= nworkers '
+                              '<= 6; adjustments for SAM record size may '
+                              'yield small performance improvements.'))
     parser.add_argument('--version',
                         action='version',
                         version=VERSION)
@@ -277,7 +304,7 @@ def read_input(inf: int|str,
 
     Args:
         inf: Input stream file name or descriptor.
-        outq: Output stream file name or descriptor.
+        outf: Output stream file name or descriptor.
         workq: SimpleQueue to put SAM records.
         nworkers: Number of workers.
         batchsize: Number of qnames per batch put into the workq (default=500).
@@ -463,18 +490,19 @@ def main() -> None:
     out = args.output
     metf = args.metrics
     reads = args.reads_per_template
-    mem = args.mem
     nitems = args.n_items
     fprate = args.fp_rate
+    mem = args.mem_sz or mem_heuristic(nitems, fprate, args.mem)
     nworkers = args.workers
     strip_previous = args.strip_previous
-    batchsize = args.workq_batch_size
+    batchsize = args.workq_batch_size or max(140 // nworkers, 20)
     workq: 'SimpleQueue[str]' = SimpleQueue()
     resultq: 'SimpleQueue[Metrics]' = SimpleQueue()
 
     LOGGER.info(MSG_VERSION, VERSION)
     LOGGER.info(' '.join(sys.argv))
-    LOGGER.info(MSG_PARAMS, mem, nitems, fprate, nworkers, batchsize)
+    memstr = mem or format_size(BloomFilter.m_k_min(nitems, fprate)[0] // 8)
+    LOGGER.info(MSG_PARAMS, memstr, nitems, fprate, nworkers, batchsize)
 
     with SharedMemoryManager() as smm:
         reader = Process(
