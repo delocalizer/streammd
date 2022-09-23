@@ -17,12 +17,8 @@ AC_PROG_CXX
 AC_CONFIG_MACRO_DIR([m4])
 
 # What to make 
-AC_CONFIG_FILES([
-		 Makefile
+AC_CONFIG_FILES([Makefile
 		 src/Makefile])
-	# when libs has source in it and needs building;
-	# currently it's just got hpp file that can be statically linked
-		 #libs/Makefile])
 
 # Generate the output
 AC_OUTPUT
