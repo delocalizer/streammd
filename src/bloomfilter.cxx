@@ -1,7 +1,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <iostream>
 #include <math.h>
-#include "../libs/xxhash_cpp/include/xxhash.hpp"
+#include <xxhash.hpp>
 
 int main(int argc, char* argv[]) {
     // initializes all to 0
