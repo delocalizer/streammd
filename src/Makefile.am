@@ -1,5 +1,7 @@
-AM_CPPFLAGS = \
-	      $(BOOST_CPPFLAGS)
+AM_CXXFLAGS = \
+	      -I ../libs/xxhash_cpp/include \
+	      -std c++17 \
+	      $(BOOST_CXXFLAGS)
 
 AM_LDFLAGS = \
 	     $(BOOST_LDFLAGS)
