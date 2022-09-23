@@ -1,0 +1,2 @@
+lib_LIBRARIES = libfoo.a
+libfoo_a_SOURCES = foo_dir/include/foo.cpp

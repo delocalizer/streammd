@@ -7,3 +7,5 @@ AM_LDFLAGS = \
 bin_PROGRAMS = streammd
 
 streammd_SOURCES = bloomfilter.cxx
+
+#LDADD = ../libs/libxxhash.a # $(INTLLIBS)
