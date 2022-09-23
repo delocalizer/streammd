@@ -1,5 +1,5 @@
 # Initialize autoconf
-AC_INIT(streammd, 0.1)
+AC_INIT(streammd, 4.0)
 
 # Initialize libtool
 LT_INIT
