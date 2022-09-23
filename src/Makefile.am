@@ -1,10 +1,8 @@
 AM_CXXFLAGS = \
-	      -I ../libs/xxhash_cpp/include \
-	      -std c++17 \
-	      $(BOOST_CXXFLAGS)
-
-AM_LDFLAGS = \
-	     $(BOOST_LDFLAGS)
+	      -std=c++17 \
+	      -I ../libs \
+	      -I ../libs/boost/dynamic_bitset \
+	      -I ../libs/xxhash_cpp/include 
 
 bin_PROGRAMS = streammd
 

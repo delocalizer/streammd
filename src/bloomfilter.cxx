@@ -1,4 +1,4 @@
-#include <boost/dynamic_bitset.hpp>
+#include <dynamic_bitset.hpp>
 #include <iostream>
 #include <math.h>
 #include <xxhash.hpp>
