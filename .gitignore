@@ -1,6 +1,10 @@
 *.log
 Makefile
+Makefile.in
+aclocal.m4
 autom4te.cache/
 config.status
+configure
+configure~
 src/*.o
 src/.deps/
