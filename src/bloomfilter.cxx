@@ -23,7 +23,8 @@ bool BloomFilter::operator&(const std::string& item) {
 
 // Add the item; return false if it was already present otherwise true.
 bool BloomFilter::operator|=(const std::string& item) {
-  uint64_t* hashes = hash(item);
+  uint64_t hashes[k_];
+  hash(item, hashes);
   for (int i = 0; i < k_; i++) {
     std::cout << hashes[i] << std::endl;
   }
@@ -38,16 +39,13 @@ std::tuple<uint64_t, int> BloomFilter::m_k_min(uint64_t n, float p) {
   return { std::tuple<uint64_t, int> { m, k } };
 }
 
-// Return k hash values for the item.
-uint64_t* BloomFilter::hash(const std::string& item) {
-  // FIXME not static; address of stack memory returned
-  uint64_t hashes[k_];
+// Generate k hash values for the item.
+void BloomFilter::hash(const std::string& item, uint64_t* buf) {
   uint64_t a { xxh::xxhash3<64>(item, seed1_) };
   uint64_t b { xxh::xxhash3<64>(item, seed2_) };
   for (uint64_t i = 0; i < k_; i++) {
-    hashes[i] = a;
+    buf[i] = a;
     a += b;
     b += i;
   }
-  return hashes;
 }
