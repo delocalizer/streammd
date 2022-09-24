@@ -8,4 +8,9 @@ AM_LDFLAGS = \
 
 bin_PROGRAMS = streammd
 
-streammd_SOURCES = bloomfilter.cxx
+streammd_SOURCES = streammd.cxx
+streammd_LDADD = libbloomfilter.a
+
+noinst_LIBRARIES = libbloomfilter.a
+libbloomfilter_a_SOURCES = bloomfilter.cxx
+
