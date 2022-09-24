@@ -1,5 +1,5 @@
-#include <iostream>
 #include <cmath>
+#include <iostream>
 #include <boost/dynamic_bitset/dynamic_bitset.hpp>
 #include <xxhash_cpp/include/xxhash.hpp>
 #include "bloomfilter.h"

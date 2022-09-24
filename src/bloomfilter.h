@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <boost/dynamic_bitset/dynamic_bitset.hpp>
 
 namespace bloomfilter {
 
@@ -35,6 +36,8 @@ class BloomFilter {
 
   uint64_t m_;
   int k_;
+
+  std::unique_ptr<boost::dynamic_bitset<>> bitset;
   
 };
 
