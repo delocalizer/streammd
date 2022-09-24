@@ -38,7 +38,7 @@ class BloomFilter {
   uint64_t m_;
   int k_;
 
-  uint64_t* hash(const std::string& item);
+  void hash(const std::string& item, uint64_t* buf);
   std::unique_ptr<boost::dynamic_bitset<>> bitset;
   
 };
