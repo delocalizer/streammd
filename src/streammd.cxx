@@ -8,6 +8,7 @@ int main(int argc, char* argv[]) {
   // initializes all to 0
   bloomfilter::BloomFilter bf(1000, 0.1);
   std::cout << "bf.m: " << bf.m() << std::endl;
+  bf |= "foo bar baz"; 
   boost::dynamic_bitset<> b1(pow(1024, 2));
   std::cout << "test(0) before set: " << b1.test(0) << std::endl;
   b1.set(0);

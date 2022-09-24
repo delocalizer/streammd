@@ -1,8 +1,12 @@
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <tuple>
+
 #include <boost/dynamic_bitset/dynamic_bitset.hpp>
+#include <xxhash_cpp/include/xxhash.hpp>
+
 #include "bloomfilter.h"
 
 using namespace bloomfilter;
@@ -19,6 +23,10 @@ bool BloomFilter::operator&(const std::string& item) {
 
 // Add the item; return false if it was already present otherwise true.
 bool BloomFilter::operator|=(const std::string& item) {
+  uint64_t* hashes = hash(item);
+  for (int i = 0; i < k_; i++) {
+    std::cout << hashes[i] << std::endl;
+  }
   return false;
 }
 
@@ -27,7 +35,19 @@ bool BloomFilter::operator|=(const std::string& item) {
 std::tuple<uint64_t, int> BloomFilter::m_k_min(uint64_t n, float p) {
   uint64_t m = std::ceil(n * - std::log(p) / std::pow(std::log(2), 2));
   int k = std::ceil(std::log(2) * m / n);
-  std::tuple<uint64_t, int> m_k { m, k };
-  return m_k;
+  return { std::tuple<uint64_t, int> { m, k } };
 }
 
+// Return k hash values for the item.
+uint64_t* BloomFilter::hash(const std::string& item) {
+  // FIXME not static; address of stack memory returned
+  uint64_t hashes[k_];
+  uint64_t a { xxh::xxhash3<64>(item, seed1_) };
+  uint64_t b { xxh::xxhash3<64>(item, seed2_) };
+  for (uint64_t i = 0; i < k_; i++) {
+    hashes[i] = a;
+    a += b;
+    b += i;
+  }
+  return hashes;
+}
