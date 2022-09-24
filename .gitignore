@@ -9,5 +9,7 @@ config.status
 configure
 configure~
 libtool
+src/streammd
+src/*.a
 src/*.o
 src/.deps/
