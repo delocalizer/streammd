@@ -1,4 +1,7 @@
 AM_CXXFLAGS = \
+	      -Wall \
+	      -Wextra \
+	      -O3 \
 	      -std=c++17 \
 	      -I ../external \
 	      $(BOOST_CXXFLAGS)
