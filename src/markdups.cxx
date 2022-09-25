@@ -5,10 +5,10 @@
 
 #include <argparse/argparse.hpp>
 
-#include "streammd.h"
+#include "markdups.h"
 #include "version.h"
 
-using namespace streammd;
+using namespace markdups;
 
 int main(int argc, char* argv[]) {
 
