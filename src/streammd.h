@@ -5,7 +5,6 @@
 #include <string>
 
 namespace streammd {
-  const std::string version { "4.0" };
   const uint64_t default_n { 1000000000 };
   const float default_p { 0.000001 };
 }

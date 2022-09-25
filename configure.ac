@@ -1,5 +1,6 @@
 # Initialize autoconf
-AC_INIT(streammd, 4.0)
+AC_INIT(streammd,
+	m4_esyscmd([grep 'define STREAMMD_VERSION ' src/version.h|cut -f 2 -d '"']))
 
 # Initialize libtool
 LT_INIT
