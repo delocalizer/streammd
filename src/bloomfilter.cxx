@@ -18,17 +18,30 @@ BloomFilter::BloomFilter(uint64_t n, float p):  n_{n}, p_{p} {
 
 // Check if item is present.
 bool BloomFilter::operator&(const std::string& item) {
-  return false;
+  uint64_t hashes[k_];
+  hash(item, hashes);
+  for (int i = 0; i < k_; i++) {
+    uint64_t pos { hashes[i] % m_ };
+    if (!bitset->test(pos)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Add the item; return false if it was already present otherwise true.
 bool BloomFilter::operator|=(const std::string& item) {
+  bool added { false };
   uint64_t hashes[k_];
   hash(item, hashes);
   for (int i = 0; i < k_; i++) {
-    std::cout << hashes[i] << std::endl;
+    uint64_t pos { hashes[i] % m_ };
+    if (!bitset->test(pos)) {
+      bitset->set(pos);
+      added = true;
+    }
   }
-  return false;
+  return added;
 }
 
 // Return the memory-optimal bitset size m and number of hash functions k
