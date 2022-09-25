@@ -9,12 +9,12 @@
 
 namespace bloomfilter {
 
+// A simple but fast Bloom filter.
 class BloomFilter {
 
  public:
 
   BloomFilter(uint64_t n, float p);
-  //~BloomFilter();
 
   bool operator&(const std::string& item);
   bool operator|=(const std::string& item);
@@ -24,11 +24,13 @@ class BloomFilter {
   inline uint64_t m() { return m_; }
   inline int k() { return k_; }
 
+  uint64_t count_estimate();
+
   static std::tuple<uint64_t, int> m_k_min(uint64_t n, float p);
 
  private:
 
-  // any 2 primes should do
+  // any 2 primes "should" do
   static const uint64_t seed1_ { 43 };
   static const uint64_t seed2_ { 9967 };
 
