@@ -4,7 +4,7 @@
 #include <tuple>
 
 #include <boost/dynamic_bitset/dynamic_bitset.hpp>
-#include <xxhash_cpp/include/xxhash.hpp>
+#include <xxhash_cpp/xxhash.hpp>
 
 #include "bloomfilter.h"
 
