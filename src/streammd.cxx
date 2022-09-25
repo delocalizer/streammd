@@ -5,41 +5,40 @@
 
 #include <argparse/argparse.hpp>
 
-#include <unistd.h>
+#include "streammd.h"
 
-std::string random_string( size_t length )
-{
-    auto randchar = []() -> char
-    {
-        const char charset[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-        const size_t max_index = (sizeof(charset) - 1);
-        return charset[ rand() % max_index ];
-    };
-    std::string str(length,0);
-    std::generate_n( str.begin(), length, randchar );
-    return str;
-}
+using namespace streammd;
 
 int main(int argc, char* argv[]) {
-  // initializes all to 0
-  int maxn { 1000000 };
-  float p { 0.000001 };
-  std::vector<std::string> randstring(maxn);
-  for (int i=0; i < maxn; i++) {
-    randstring[i] = random_string(10);
+
+  argparse::ArgumentParser cli("streammd", version);
+
+  cli.add_argument("-n", "--n-items")
+    .help("Expected maximum number of templates n.")
+    .default_value(default_n)
+    .scan<'d', uint64_t>();
+
+  cli.add_argument("-p", "--fp-rate")
+    .help("Target maximum false positive rate when n items are stored.")
+    .default_value(default_p)
+    .scan<'g', float>();
+
+  try {
+    cli.parse_args(argc, argv);
+  } catch(const std::runtime_error& err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << cli;
+    std::exit(1);
   }
-  std::cout << "done generating random strings" << std::endl;
-  bloomfilter::BloomFilter bf(maxn, p);
+
+  auto n { cli.get<uint64_t>("-n") };
+  auto p { cli.get<float>("-p") };
+  std::cout << "n: " << n << " p: " << p << std::endl;
+  bloomfilter::BloomFilter bf(n, p);
   std::string item { "foo bar baz" };
-  std::cout << "bf & item before add: " << (bf & item) << std::endl;
-  bf |= item; 
-  std::cout << "bf & item after add: " << (bf & item) << std::endl;
-  for (int i=0; i < maxn; i++) {
-    bf |= randstring[i];
-  }
+  std::cout << "bf.contains(item) before add: " << bf.contains(item) << std::endl;
+  bf.add(item); 
+  std::cout << "bf.contains(item) after add: " << bf.contains(item) << std::endl;
   std::cout << "count_estimate: " << bf.count_estimate() << std::endl;
 }
 

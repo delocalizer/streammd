@@ -13,11 +13,12 @@ using namespace bloomfilter;
 // Create a Bloom filter for target maximum n items and false-positive rate p.
 BloomFilter::BloomFilter(uint64_t n, float p):  n_{n}, p_{p} {
   std::tie(m_, k_) = m_k_min(n_, p_);
-  bitset = std::unique_ptr<boost::dynamic_bitset<>>(new boost::dynamic_bitset<>(m_));
+  // dynamic_bitset constructor initializes all to 0
+  bitset = std::unique_ptr<boost::dynamic_bitset<>>(new boost::dynamic_bitset(m_));
 }
 
 // Check if item is present.
-bool BloomFilter::operator&(const std::string& item) {
+bool BloomFilter::contains(const std::string& item) {
   uint64_t hashes[k_];
   hash(item, hashes);
   for (int i = 0; i < k_; i++) {
@@ -30,7 +31,7 @@ bool BloomFilter::operator&(const std::string& item) {
 }
 
 // Add the item; return false if it was already present otherwise true.
-bool BloomFilter::operator|=(const std::string& item) {
+bool BloomFilter::add(const std::string& item) {
   bool added { false };
   uint64_t hashes[k_];
   hash(item, hashes);
