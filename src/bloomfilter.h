@@ -16,8 +16,8 @@ class BloomFilter {
 
   BloomFilter(uint64_t n, float p);
 
-  bool operator&(const std::string& item);
-  bool operator|=(const std::string& item);
+  bool contains(const std::string& item);
+  bool add(const std::string& item);
 
   inline uint64_t n() { return n_; }
   inline float p() { return p_; }
