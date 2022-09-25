@@ -6,12 +6,13 @@
 #include <argparse/argparse.hpp>
 
 #include "streammd.h"
+#include "version.h"
 
 using namespace streammd;
 
 int main(int argc, char* argv[]) {
 
-  argparse::ArgumentParser cli("streammd", version);
+  argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
 
   cli.add_argument("-n", "--n-items")
     .help("Expected maximum number of templates n.")
