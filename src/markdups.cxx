@@ -1,10 +1,10 @@
 #include <cmath>
 #include <iostream>
 #include <string>
-#include "bloomfilter.h"
 
 #include <argparse/argparse.hpp>
 
+#include "bloomfilter.h"
 #include "markdups.h"
 #include "version.h"
 
@@ -32,6 +32,11 @@ int main(int argc, char* argv[]) {
     .metavar("FP_RATE")
     .scan<'g', float>();
 
+  cli.add_argument("--metrics")
+    .help("Output metrics file.")
+    .default_value(default_metrics)
+    .metavar("METRICS_FILE");
+
   cli.add_argument("--single")
     .help("Accept single-ended reads as input. [default: paired-end]")
     .default_value(false)
@@ -55,6 +60,8 @@ int main(int argc, char* argv[]) {
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<float>("-p") };
   auto reads_per_template { cli.get<bool>("--single") ? 1 : 2 };
+  auto bf { bloomfilter::BloomFilter(n, p) };
 
+  return 0;
 }
 
