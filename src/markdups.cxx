@@ -2,15 +2,32 @@
 #include <iostream>
 #include <string>
 
+#include <boost/log/core.hpp>
+#include <boost/log/trivial.hpp>
+#include <boost/log/expressions.hpp>
+
 #include <argparse/argparse.hpp>
 
 #include "bloomfilter.h"
 #include "markdups.h"
 #include "version.h"
 
+
+namespace logging = boost::log;
+
+void logging_init()
+{
+  logging::core::get()->set_filter
+  (
+    logging::trivial::severity >= logging::trivial::info
+  );
+}
+
 using namespace markdups;
 
 int main(int argc, char* argv[]) {
+
+  logging_init();
 
   argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
 
