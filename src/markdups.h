@@ -14,6 +14,7 @@ namespace markdups {
   const std::regex re_cigar { R"((?:(\d+)([MIDNSHPX=])))" };
   const std::regex re_leading_s { R"(^(\d+)S)" };                       
   const std::regex re_trailing_s { R"((\d+)S$)" };
+  const std::set consumes_reference { 'M', 'D', 'N', '=', 'X' };
   const std::string default_metrics { "streammd-metrics.json" };
   const std::tuple<std::string, uint32_t, char> unmapped { std::string(1, DEL), 0, DEL };
   const uint32_t log_interval { 1000000 };

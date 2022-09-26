@@ -15,13 +15,6 @@
 
 using namespace markdups;
 
-// Mark duplicates in-place.
-void mark_duplicates(
-    std::vector<std::vector<std::string>>& qname_group,
-    int& reads_per_template,
-    bloomfilter::BloomFilter& bf){
-}
-
 void readends(
     std::vector<std::vector<std::string>>& qname_group,
     std::vector<std::tuple<std::string, uint32_t, char>>& ends) {
@@ -40,20 +33,49 @@ void readends(
       ends.push_back(unmapped);
     // forward
     } else if (!(flag & flag_reverse)) {
-
+      std::smatch sm;
+      regex_search(cigar, sm, re_leading_s);
+      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+      ends.push_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
     // reverse
     } else {
-
+      std::smatch sm;
+      regex_search(cigar, sm, re_trailing_s);
+      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
+      int ref_end { ref_start };
+      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
+      std::sregex_iterator end;
+      while (iter != end){
+        int num { stoi((*iter)[1]) };
+        const char op { std::string((*iter)[2]).c_str()[0] };
+        if (consumes_reference.count(op)) {
+          ref_end += num;
+        }
+        ++iter;
+      }
+      ends.push_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
     }
   }
   sort(ends.begin(), ends.end());
+}
+
+// Mark duplicates in-place.
+void mark_duplicates(
+    std::vector<std::vector<std::string>>& qname_group,
+    int& reads_per_template,
+    bloomfilter::BloomFilter& bf){
+  std::vector<std::tuple<std::string, uint32_t, char>> ends;
+  readends(qname_group, ends);
+  for (auto end : ends) {
+    std::cout << std::get<0>(end) << "_" << std::get<1>(end) << "_" << std::get<2>(end) << std::endl;
+  }
 }
 
 // Write out records.
 void write(
   std::vector<std::vector<std::string>>& qname_group,
     std::ostream& out) {
-  for (auto record: qname_group) {
+  for (auto record : qname_group) {
     std::string line;
     join(record, SAM_delimiter, line);
     out << line << std::endl;
@@ -85,7 +107,7 @@ void process(
           spdlog::debug("qnames read: {0}", n_qname); 
         }
         mark_duplicates(qname_group, reads_per_template, bf);
-        write(qname_group, out);
+        //write(qname_group, out);
         qname_group.clear();
         qname_prev = qname;
       }
@@ -93,7 +115,7 @@ void process(
     }
   }
   mark_duplicates(qname_group, reads_per_template, bf);
-  write(qname_group, out);
+  //write(qname_group, out);
 }
 
 int main(int argc, char* argv[]) {
@@ -182,7 +204,7 @@ int main(int argc, char* argv[]) {
   std::sregex_iterator end;
   while (iter != end){
     std::cout << (*iter)[0] << std::endl;
-    for(unsigned i=1; i < iter->size(); ++i) {
+    for (auto i = 1; i <= 2; ++i) {
       std::cout << "\t" << (*iter)[i] << std::endl;
     }
     ++iter;
