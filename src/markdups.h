@@ -2,6 +2,7 @@
 #define STREAMMD_MARKDUPS_H_
 
 #include <cstdint>
+#include <regex>
 #include <string>
 #include <tuple>
 
@@ -10,6 +11,9 @@ namespace markdups {
   const char DEL { 127 };
   const char SAM_delimiter { '\t' };
   const float default_p { 0.000001 };
+  const std::regex re_cigar { R"((?:(\d+)([MIDNSHPX=])))" };
+  const std::regex re_leading_s { R"(^(\d+)S)" };                       
+  const std::regex re_trailing_s { R"((\d+)S$)" };
   const std::string default_metrics { "streammd-metrics.json" };
   const std::tuple<std::string, uint32_t, char> unmapped { std::string(1, DEL), 0, DEL };
   const uint32_t log_interval { 1000000 };

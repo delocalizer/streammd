@@ -163,6 +163,31 @@ int main(int argc, char* argv[]) {
   std::ifstream inf;
   std::ofstream outf;
 
+  std::string teststr1 {"10S65M"};
+  std::string teststr2 {"65M10S"};
+  std::smatch sm;
+  regex_search(teststr1, sm, re_leading_s);
+  if (!sm.empty()) {
+    std::cout << sm[0] << std::endl;
+  } else {
+    std::cout << "not found in " << teststr1 << std::endl;
+  }
+  regex_search(teststr2, sm, re_trailing_s);
+  if (!sm.empty()) {
+    std::cout << sm[0] << std::endl;
+  } else {
+    std::cout << "not found in " << teststr2 << std::endl;
+  }
+  std::sregex_iterator iter(teststr1.begin(), teststr1.end(), re_cigar);
+  std::sregex_iterator end;
+  while (iter != end){
+    std::cout << (*iter)[0] << std::endl;
+    for(unsigned i=1; i < iter->size(); ++i) {
+      std::cout << "\t" << (*iter)[i] << std::endl;
+    }
+    ++iter;
+  }
+
   process(
       infname ? [&]() -> std::istream& {
         inf.open(*infname);
