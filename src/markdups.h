@@ -6,12 +6,12 @@
 #include <tuple>
 
 namespace markdups {
-  const char SAM_delimiter { '\t' };
+  // DEL sorts last in ASCII
   const char DEL { 127 };
+  const char SAM_delimiter { '\t' };
   const float default_p { 0.000001 };
   const std::string default_metrics { "streammd-metrics.json" };
-  // DEL sorts last in ASCII
-  const std::string unmapped { DEL };
+  const std::tuple<std::string, uint32_t, char> unmapped { std::string(1, DEL), 0, DEL };
   const uint32_t log_interval { 1000000 };
   const uint64_t default_n { 1000000000 };
   const unsigned short flag_unmapped = 4;

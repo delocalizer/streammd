@@ -13,7 +13,6 @@
 #include "markdups.h"
 #include "version.h"
 
-
 using namespace markdups;
 
 // Mark duplicates in-place.
@@ -25,7 +24,7 @@ void mark_duplicates(
 
 void readends(
     std::vector<std::vector<std::string>>& qname_group,
-    std::vector<std::string>& ends) {
+    std::vector<std::tuple<std::string, uint32_t, char>>& ends) {
 
   for (auto read : qname_group) {
     auto flag      = stoi(read[1]);
@@ -47,6 +46,7 @@ void readends(
 
     }
   }
+  sort(ends.begin(), ends.end());
 }
 
 // Write out records.
@@ -71,9 +71,6 @@ void process(
   std::string qname_prev { "" };
   std::string qname;
   std::vector<std::vector<std::string>> qname_group;
-
-  char tilde { 126 };
-  std::cout << tilde << std::endl;
 
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
