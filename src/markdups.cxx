@@ -15,12 +15,25 @@
 
 using namespace markdups;
 
+// Mark duplicates in-place.
+void mark_duplicates(
+    std::vector<std::vector<std::string>>& qname_group,
+    bloomfilter::BloomFilter& bf) {
+  std::cout << qname_group[0][0] << ": " << qname_group.size() << std::endl;
+}
+
+// Read the input SAM and write duplicate marked records.
 void process(
     std::istream& in,
     std::ostream& out,
     int reads_per_template,
     bloomfilter::BloomFilter& bf) {
   
+  uint64_t n_qname { 0 };
+  std::string qname_prev { "" };
+  std::string qname;
+  std::vector<std::vector<std::string>> qname_group;
+
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
@@ -31,9 +44,23 @@ void process(
       while(std::getline(line_stream, tkn, SAM_delimiter)) {
         fields.push_back(tkn);
       }
-      out << fields[0] << std::endl;
+      qname = fields[0];
+      if (qname != qname_prev) {
+        n_qname += 1;
+        if (n_qname % log_interval == 0) {
+          spdlog::debug("qnames read: {0}", n_qname); 
+        }
+        if (!qname_group.empty()){
+          mark_duplicates(qname_group);
+
+        }
+        qname_group.clear();
+        qname_prev = qname;
+      }
+      qname_group.push_back(fields);
     }
   }
+  mark_duplicates(qname_group);
 }
 
 int main(int argc, char* argv[]) {
@@ -116,4 +143,3 @@ int main(int argc, char* argv[]) {
       bf
   );
 }
-
