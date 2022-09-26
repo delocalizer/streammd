@@ -36,7 +36,7 @@ void logging_init()
   } else {
     std::cerr << severity_str << " is not a valid log level" << std::endl;
     std::exit(1);
-  };
+  }
   logging::core::get()->set_filter
   (
     logging::trivial::severity >= severity
@@ -50,7 +50,7 @@ void read_input(std::istream& in, std::ostream& out) {
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
     }
-  };
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -113,14 +113,21 @@ int main(int argc, char* argv[]) {
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<float>("-p") };
   auto reads_per_template { cli.get<bool>("--single") ? 1 : 2 };
-//  std::istream in;
-//  if (auto infile = cli.present("--input")) {
-//    in.open(infile);
-//  } else {
-//    in = std::cin;
-//  };
-
-  read_input(std::cin, std::cout);
+  auto infname = cli.present("--input");
+  auto outfname = cli.present("--output");
+  std::ifstream inf;
+  std::ofstream outf;
+  read_input(
+      infname ? [&]() -> std::istream& {
+        inf.open(*infname);
+        if (!inf) {
+          std::cerr << *infname << " No such file" << std::endl;
+          exit(1);
+        }
+        return inf;
+      }() : std::cin,
+      outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout
+  );
 
   //auto bf { bloomfilter::BloomFilter(n, p) };
 }
