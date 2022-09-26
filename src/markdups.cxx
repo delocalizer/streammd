@@ -7,6 +7,7 @@
 #include <argparse/argparse.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/cfg/env.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include "bloomfilter.h"
 #include "markdups.h"
@@ -15,14 +16,44 @@
 
 using namespace markdups;
 
+inline void join(
+    const std::vector<std::string> fields, const char& sep, std::string& result) {
+  unsigned i {0};
+  auto imax { fields.size()-1 };
+  for (auto & field : fields) {
+    result += field;
+    if (i < imax) {
+      result += sep;
+    }
+    i++;
+  }
+}
+
+inline void split(const std::string& line, std::vector<std::string>& fields) {
+  std::stringstream line_stream{ line };
+  std::string tkn;
+  while(std::getline(line_stream, tkn, SAM_delimiter)) {
+    fields.push_back(tkn);
+  }
+}
+
 // Mark duplicates in-place.
 void mark_duplicates(
     std::vector<std::vector<std::string>>& qname_group,
     bloomfilter::BloomFilter& bf) {
-  std::cout << qname_group[0][0] << ": " << qname_group.size() << std::endl;
 }
 
-// Read the input SAM and write duplicate marked records.
+// Write out records.
+void write(std::vector<std::vector<std::string>>& qname_group,
+    std::ostream& out) {
+  for (auto record: qname_group) {
+    std::string line;
+    join(record, SAM_delimiter, line);
+    out << line << std::endl;
+  }
+}
+
+// Orchestrate the reading, duplicate marking and writing.
 void process(
     std::istream& in,
     std::ostream& out,
@@ -38,12 +69,8 @@ void process(
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
     } else {
-      std::stringstream line_stream{ line };
       std::vector<std::string> fields;
-      std::string tkn;
-      while(std::getline(line_stream, tkn, SAM_delimiter)) {
-        fields.push_back(tkn);
-      }
+      split(line, fields);
       qname = fields[0];
       if (qname != qname_prev) {
         n_qname += 1;
@@ -51,8 +78,8 @@ void process(
           spdlog::debug("qnames read: {0}", n_qname); 
         }
         if (!qname_group.empty()){
-          mark_duplicates(qname_group);
-
+          mark_duplicates(qname_group, bf);
+          write(qname_group, out);
         }
         qname_group.clear();
         qname_prev = qname;
@@ -60,11 +87,15 @@ void process(
       qname_group.push_back(fields);
     }
   }
-  mark_duplicates(qname_group);
+  mark_duplicates(qname_group, bf);
+  write(qname_group, out);
 }
 
 int main(int argc, char* argv[]) {
 
+  // https://spdlog.docsforge.com/v1.x/0.faq/#switch-the-default-logger-to-stderr
+  spdlog::set_default_logger(spdlog::stderr_color_st("tmp"));
+  spdlog::set_default_logger(spdlog::stderr_color_st(""));
   spdlog::cfg::load_env_levels();
 
   argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
