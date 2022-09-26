@@ -13,8 +13,56 @@
 #include "markdups.h"
 #include "version.h"
 
-using namespace markdups;
+namespace markdups {
 
+// Orchestrate the reading, dupe marking, and writing.
+void process(
+    std::istream& in,
+    std::ostream& out,
+    int reads_per_template,
+    bloomfilter::BloomFilter& bf) {
+  
+  uint64_t n_qname { 0 };
+  std::string qname_prev { "" };
+  std::string qname;
+  std::vector<std::vector<std::string>> qname_group;
+
+  for (std::string line; std::getline(in, line);) {
+    if (line.rfind("@", 0) == 0) {
+      out << line << std::endl;
+    } else {
+      std::vector<std::string> fields { split(line, SAM_delimiter) };
+      qname = fields[0];
+      if (qname != qname_prev) {
+        n_qname += 1;
+        if (n_qname % log_interval == 0) {
+          spdlog::debug("qnames read: {0}", n_qname); 
+        }
+        mark_duplicates(qname_group, reads_per_template, bf);
+        //write(qname_group, out);
+        qname_group.clear();
+        qname_prev = qname;
+      }
+      qname_group.push_back(fields);
+    }
+  }
+  mark_duplicates(qname_group, reads_per_template, bf);
+  //write(qname_group, out);
+}
+
+// Mark duplicates in-place.
+void mark_duplicates(
+    std::vector<std::vector<std::string>>& qname_group,
+    int& reads_per_template,
+    bloomfilter::BloomFilter& bf){
+  std::vector<std::tuple<std::string, uint32_t, char>> ends;
+  readends(qname_group, ends);
+  for (auto end : ends) {
+    std::cout << std::get<0>(end) << "_" << std::get<1>(end) << "_" << std::get<2>(end) << std::endl;
+  }
+}
+
+// Calculate read ends.
 void readends(
     std::vector<std::vector<std::string>>& qname_group,
     std::vector<std::tuple<std::string, uint32_t, char>>& ends) {
@@ -59,65 +107,19 @@ void readends(
   sort(ends.begin(), ends.end());
 }
 
-// Mark duplicates in-place.
-void mark_duplicates(
-    std::vector<std::vector<std::string>>& qname_group,
-    int& reads_per_template,
-    bloomfilter::BloomFilter& bf){
-  std::vector<std::tuple<std::string, uint32_t, char>> ends;
-  readends(qname_group, ends);
-  for (auto end : ends) {
-    std::cout << std::get<0>(end) << "_" << std::get<1>(end) << "_" << std::get<2>(end) << std::endl;
-  }
-}
-
 // Write out records.
 void write(
   std::vector<std::vector<std::string>>& qname_group,
     std::ostream& out) {
   for (auto record : qname_group) {
-    std::string line;
-    join(record, SAM_delimiter, line);
+    std::string line { join(record, SAM_delimiter) };
     out << line << std::endl;
   }
 }
 
-// Orchestrate the reading, dupe marking, and writing.
-void process(
-    std::istream& in,
-    std::ostream& out,
-    int reads_per_template,
-    bloomfilter::BloomFilter& bf) {
-  
-  uint64_t n_qname { 0 };
-  std::string qname_prev { "" };
-  std::string qname;
-  std::vector<std::vector<std::string>> qname_group;
-
-  for (std::string line; std::getline(in, line);) {
-    if (line.rfind("@", 0) == 0) {
-      out << line << std::endl;
-    } else {
-      std::vector<std::string> fields;
-      split(line, fields);
-      qname = fields[0];
-      if (qname != qname_prev) {
-        n_qname += 1;
-        if (n_qname % log_interval == 0) {
-          spdlog::debug("qnames read: {0}", n_qname); 
-        }
-        mark_duplicates(qname_group, reads_per_template, bf);
-        //write(qname_group, out);
-        qname_group.clear();
-        qname_prev = qname;
-      }
-      qname_group.push_back(fields);
-    }
-  }
-  mark_duplicates(qname_group, reads_per_template, bf);
-  //write(qname_group, out);
 }
 
+using namespace markdups;
 int main(int argc, char* argv[]) {
 
   spdlog::set_default_logger(spdlog::stderr_color_st("main"));
@@ -184,31 +186,6 @@ int main(int argc, char* argv[]) {
   auto outfname = cli.present("--output");
   std::ifstream inf;
   std::ofstream outf;
-
-  std::string teststr1 {"10S65M"};
-  std::string teststr2 {"65M10S"};
-  std::smatch sm;
-  regex_search(teststr1, sm, re_leading_s);
-  if (!sm.empty()) {
-    std::cout << sm[0] << std::endl;
-  } else {
-    std::cout << "not found in " << teststr1 << std::endl;
-  }
-  regex_search(teststr2, sm, re_trailing_s);
-  if (!sm.empty()) {
-    std::cout << sm[0] << std::endl;
-  } else {
-    std::cout << "not found in " << teststr2 << std::endl;
-  }
-  std::sregex_iterator iter(teststr1.begin(), teststr1.end(), re_cigar);
-  std::sregex_iterator end;
-  while (iter != end){
-    std::cout << (*iter)[0] << std::endl;
-    for (auto i = 1; i <= 2; ++i) {
-      std::cout << "\t" << (*iter)[i] << std::endl;
-    }
-    ++iter;
-  }
 
   process(
       infname ? [&]() -> std::istream& {
