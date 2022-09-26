@@ -16,35 +16,42 @@
 
 using namespace markdups;
 
-inline void join(
-    const std::vector<std::string> fields, const char& sep, std::string& result) {
-  unsigned i {0};
-  auto imax { fields.size()-1 };
-  for (auto & field : fields) {
-    result += field;
-    if (i < imax) {
-      result += sep;
-    }
-    i++;
-  }
-}
-
-inline void split(const std::string& line, std::vector<std::string>& fields) {
-  std::stringstream line_stream{ line };
-  std::string tkn;
-  while(std::getline(line_stream, tkn, SAM_delimiter)) {
-    fields.push_back(tkn);
-  }
-}
-
 // Mark duplicates in-place.
 void mark_duplicates(
     std::vector<std::vector<std::string>>& qname_group,
-    bloomfilter::BloomFilter& bf) {
+    int& reads_per_template,
+    bloomfilter::BloomFilter& bf){
+}
+
+void readends(
+    std::vector<std::vector<std::string>>& qname_group,
+    std::vector<std::string>& ends) {
+
+  for (auto read : qname_group) {
+    auto flag      = stoi(read[1]);
+    auto rname     = read[2];
+    auto ref_start = stoi(read[3]);
+    auto cigar     = read[5];
+    // use only primary alignments for end calculation
+    if ((flag & flag_secondary) || (flag & flag_supplementary)){
+      continue;
+    }
+    // unmapped
+    if (flag & flag_unmapped){
+      ends.push_back(unmapped);
+    // forward
+    } else if (!(flag & flag_reverse)) {
+
+    // reverse
+    } else {
+
+    }
+  }
 }
 
 // Write out records.
-void write(std::vector<std::vector<std::string>>& qname_group,
+void write(
+  std::vector<std::vector<std::string>>& qname_group,
     std::ostream& out) {
   for (auto record: qname_group) {
     std::string line;
@@ -53,7 +60,7 @@ void write(std::vector<std::vector<std::string>>& qname_group,
   }
 }
 
-// Orchestrate the reading, duplicate marking and writing.
+// Orchestrate the reading, dupe marking, and writing.
 void process(
     std::istream& in,
     std::ostream& out,
@@ -64,6 +71,9 @@ void process(
   std::string qname_prev { "" };
   std::string qname;
   std::vector<std::vector<std::string>> qname_group;
+
+  char tilde { 126 };
+  std::cout << tilde << std::endl;
 
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
@@ -77,17 +87,15 @@ void process(
         if (n_qname % log_interval == 0) {
           spdlog::debug("qnames read: {0}", n_qname); 
         }
-        if (!qname_group.empty()){
-          mark_duplicates(qname_group, bf);
-          write(qname_group, out);
-        }
+        mark_duplicates(qname_group, reads_per_template, bf);
+        write(qname_group, out);
         qname_group.clear();
         qname_prev = qname;
       }
       qname_group.push_back(fields);
     }
   }
-  mark_duplicates(qname_group, bf);
+  mark_duplicates(qname_group, reads_per_template, bf);
   write(qname_group, out);
 }
 
