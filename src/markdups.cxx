@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <boost/log/core.hpp>
 #include <boost/log/trivial.hpp>
@@ -34,7 +35,7 @@ void logging_init()
   if (entry != levels.end()) {
     severity = entry->second;
   } else {
-    std::cerr << severity_str << " is not a valid log level" << std::endl;
+    std::cerr << severity_str << ": Not a valid log level" << std::endl;
     std::exit(1);
   }
   logging::core::get()->set_filter
@@ -45,10 +46,23 @@ void logging_init()
 
 using namespace markdups;
 
-void read_input(std::istream& in, std::ostream& out) {
+void process(
+    std::istream& in,
+    std::ostream& out,
+    int reads_per_template,
+    bloomfilter::BloomFilter& bf) {
+  
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
+    } else {
+      std::stringstream line_stream{ line };
+      std::vector<std::string> fields;
+      std::string tkn;
+      while(std::getline(line_stream, tkn, SAM_delimiter)) {
+        fields.push_back(tkn);
+      }
+      std::cout << fields[0] << std::endl;
     }
   }
 }
@@ -112,23 +126,25 @@ int main(int argc, char* argv[]) {
 
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<float>("-p") };
-  auto reads_per_template { cli.get<bool>("--single") ? 1 : 2 };
+  auto bf { bloomfilter::BloomFilter(n, p) };
+
   auto infname = cli.present("--input");
   auto outfname = cli.present("--output");
   std::ifstream inf;
   std::ofstream outf;
-  read_input(
+
+  process(
       infname ? [&]() -> std::istream& {
         inf.open(*infname);
         if (!inf) {
-          std::cerr << *infname << " No such file" << std::endl;
+          std::cerr << *infname << ": No such file" << std::endl;
           exit(1);
         }
         return inf;
       }() : std::cin,
-      outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout
+      outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout,
+      cli.get<bool>("--single") ? 1 : 2,
+      bf
   );
-
-  //auto bf { bloomfilter::BloomFilter(n, p) };
 }
 
