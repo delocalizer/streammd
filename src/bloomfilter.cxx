@@ -9,7 +9,7 @@
 
 #include "bloomfilter.h"
 
-using namespace bloomfilter;
+namespace bloomfilter {
 
 // Create a Bloom filter for target maximum n items and false-positive rate p.
 BloomFilter::BloomFilter(uint64_t n, float p):  n_{n}, p_{p} {
@@ -75,4 +75,6 @@ void BloomFilter::hash(const std::string& item, uint64_t* buf) {
     a += b;
     b += i;
   }
+}
+
 }

@@ -13,47 +13,11 @@
 #include "markdups.h"
 #include "version.h"
 
+using end_t = std::tuple<std::string, uint32_t, char>;
 
-using namespace markdups;
+namespace markdups {
 
-inline void join(
-    const std::vector<std::string> fields, const char& sep, std::string& result) {
-  unsigned i {0};
-  auto imax { fields.size()-1 };
-  for (auto & field : fields) {
-    result += field;
-    if (i < imax) {
-      result += sep;
-    }
-    i++;
-  }
-}
-
-inline void split(const std::string& line, std::vector<std::string>& fields) {
-  std::stringstream line_stream{ line };
-  std::string tkn;
-  while(std::getline(line_stream, tkn, SAM_delimiter)) {
-    fields.push_back(tkn);
-  }
-}
-
-// Mark duplicates in-place.
-void mark_duplicates(
-    std::vector<std::vector<std::string>>& qname_group,
-    bloomfilter::BloomFilter& bf) {
-}
-
-// Write out records.
-void write(std::vector<std::vector<std::string>>& qname_group,
-    std::ostream& out) {
-  for (auto record: qname_group) {
-    std::string line;
-    join(record, SAM_delimiter, line);
-    out << line << std::endl;
-  }
-}
-
-// Orchestrate the reading, duplicate marking and writing.
+// Orchestrate the reading, dupe marking, and writing.
 void process(
     std::istream& in,
     std::ostream& out,
@@ -69,27 +33,104 @@ void process(
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
     } else {
-      std::vector<std::string> fields;
-      split(line, fields);
+      std::vector<std::string> fields { split(line, SAM_delimiter) };
       qname = fields[0];
       if (qname != qname_prev) {
         n_qname += 1;
         if (n_qname % log_interval == 0) {
           spdlog::debug("qnames read: {0}", n_qname); 
         }
-        if (!qname_group.empty()){
-          mark_duplicates(qname_group, bf);
-          write(qname_group, out);
-        }
+        mark_duplicates(qname_group, reads_per_template, bf);
+        //write(qname_group, out);
         qname_group.clear();
         qname_prev = qname;
       }
       qname_group.push_back(fields);
     }
   }
-  mark_duplicates(qname_group, bf);
-  write(qname_group, out);
+  mark_duplicates(qname_group, reads_per_template, bf);
+  //write(qname_group, out);
 }
+
+// Mark duplicates in-place.
+void mark_duplicates(
+    std::vector<std::vector<std::string>>& qname_group,
+    int reads_per_template,
+    bloomfilter::BloomFilter& bf){
+  std::vector<end_t> ends { readends(qname_group) };
+  std::vector<std::string> ends_str;
+  for (auto end : ends) {
+    std::string end_str { std::get<0>(end) };
+    // Place F|R next because rname can end in a digit and we need string
+    // values that distinguish between ("chr1", 1234) and ("chr11", 234) 
+    end_str += std::get<2>(end);
+    end_str += std::to_string(std::get<1>(end));
+    ends_str.push_back(end_str);
+    std::cout << end_str << std::endl;
+  }
+}
+
+// Calculate read ends.
+// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
+// vector of them is in coordinate-sorted order. Unmapped ends sort last by
+// construction.
+std::vector<end_t> readends(
+    const std::vector<std::vector<std::string>>& qname_group) {
+
+  std::vector<end_t> ends;
+
+  for (auto read : qname_group) {
+    auto flag      = stoi(read[1]);
+    auto rname     = read[2];
+    auto ref_start = stoi(read[3]);
+    auto cigar     = read[5];
+    // use only primary alignments for end calculation
+    if ((flag & flag_secondary) || (flag & flag_supplementary)){
+      continue;
+    }
+    // unmapped
+    if (flag & flag_unmapped){
+      ends.push_back(unmapped);
+    // forward
+    } else if (!(flag & flag_reverse)) {
+      std::smatch sm;
+      regex_search(cigar, sm, re_leading_s);
+      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+      ends.push_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
+    // reverse
+    } else {
+      std::smatch sm;
+      regex_search(cigar, sm, re_trailing_s);
+      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
+      int ref_end { ref_start };
+      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
+      std::sregex_iterator end;
+      while (iter != end){
+        if (consumes_reference.count((*iter)[2])) {
+          ref_end += stoi((*iter)[1]);
+        }
+        ++iter;
+      }
+      ends.push_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
+    }
+  }
+  sort(ends.begin(), ends.end());
+  return ends;
+}
+
+// Write out records.
+void write(
+  std::vector<std::vector<std::string>>& qname_group,
+    std::ostream& out) {
+  for (auto record : qname_group) {
+    std::string line { join(record, SAM_delimiter) };
+    out << line << std::endl;
+  }
+}
+
+}
+
+using namespace markdups;
 
 int main(int argc, char* argv[]) {
 
