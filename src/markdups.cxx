@@ -93,9 +93,7 @@ void process(
 
 int main(int argc, char* argv[]) {
 
-  // https://spdlog.docsforge.com/v1.x/0.faq/#switch-the-default-logger-to-stderr
-  spdlog::set_default_logger(spdlog::stderr_color_st("tmp"));
-  spdlog::set_default_logger(spdlog::stderr_color_st(""));
+  spdlog::set_default_logger(spdlog::stderr_color_st("main"));
   spdlog::cfg::load_env_levels();
 
   argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
