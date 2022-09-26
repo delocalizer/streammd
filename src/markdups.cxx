@@ -1,4 +1,5 @@
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -13,17 +14,44 @@
 #include "version.h"
 
 
-namespace logging = boost::log;
-
+// Set logging filter from LOG_LEVEL environment variable, defaulting to info.
 void logging_init()
 {
+  namespace logging = boost::log;
+  static std::map<std::string, logging::trivial::severity_level> const levels {
+    {
+      {"trace",   logging::trivial::severity_level::trace},
+      {"debug",   logging::trivial::severity_level::debug},
+      {"info",    logging::trivial::severity_level::info},
+      {"warning", logging::trivial::severity_level::warning},
+      {"error",   logging::trivial::severity_level::error},
+      {"fatal",   logging::trivial::severity_level::fatal}
+    }
+  };
+  std::string severity_str { std::getenv("LOG_LEVEL") ?: "info" };
+  logging::trivial::severity_level severity;
+  auto entry = levels.find(severity_str);
+  if (entry != levels.end()) {
+    severity = entry->second;
+  } else {
+    std::cerr << severity_str << " is not a valid log level" << std::endl;
+    std::exit(1);
+  };
   logging::core::get()->set_filter
   (
-    logging::trivial::severity >= logging::trivial::info
+    logging::trivial::severity >= severity
   );
 }
 
 using namespace markdups;
+
+void read_input(std::istream& in, std::ostream& out) {
+  for (std::string line; std::getline(in, line);) {
+    if (line.rfind("@", 0) == 0) {
+      out << line << std::endl;
+    }
+  };
+}
 
 int main(int argc, char* argv[]) {
 
@@ -34,8 +62,16 @@ int main(int argc, char* argv[]) {
   cli.add_description(
     "Read a SAM file from STDIN, mark duplicates in a single pass and stream "
     "processed records to STDOUT. Input must begin with a valid SAM header "
-    "followed by qname-grouped records. Default log level is 'INFO' — set to "
-    "something else with the LOG_LEVEL environment variable.");
+    "followed by qname-grouped records. Default log level is 'info' — set to "
+    "something else (e.g. 'warning') with the LOG_LEVEL environment variable.");
+
+  cli.add_argument("--input")
+    .help("Input file. [default: STDIN]")
+    .metavar("INPUT");
+
+  cli.add_argument("--output")
+    .help("Output file. [default: STDOUT]")
+    .metavar("OUTPUT");
 
   cli.add_argument("-n", "--n-items")
     .help("Expected maximum number of templates n.")
@@ -77,8 +113,15 @@ int main(int argc, char* argv[]) {
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<float>("-p") };
   auto reads_per_template { cli.get<bool>("--single") ? 1 : 2 };
-  auto bf { bloomfilter::BloomFilter(n, p) };
+//  std::istream in;
+//  if (auto infile = cli.present("--input")) {
+//    in.open(infile);
+//  } else {
+//    in = std::cin;
+//  };
 
-  return 0;
+  read_input(std::cin, std::cout);
+
+  //auto bf { bloomfilter::BloomFilter(n, p) };
 }
 
