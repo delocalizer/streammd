@@ -30,10 +30,6 @@ Inherent, due to the nature of the single-pass operation:
 
 ## Requirements
 
-### Runtime
-
-* Boost >= 1.56 built with dynamically linkable artifacts.
-
 ### Development
 
 * Compiler that supports c++17 e.g. gcc >= 7.1 or clang >= 5.

@@ -4,45 +4,14 @@
 #include <string>
 #include <vector>
 
-#include <boost/log/core.hpp>
-#include <boost/log/trivial.hpp>
-#include <boost/log/expressions.hpp>
-
 #include <argparse/argparse.hpp>
+#include <spdlog/spdlog.h>
+#include <spdlog/cfg/env.h>
 
 #include "bloomfilter.h"
 #include "markdups.h"
 #include "version.h"
 
-
-// Set logging filter from LOG_LEVEL environment variable, defaulting to info.
-void logging_init()
-{
-  namespace logging = boost::log;
-  static std::map<std::string, logging::trivial::severity_level> const levels {
-    {
-      {"trace",   logging::trivial::severity_level::trace},
-      {"debug",   logging::trivial::severity_level::debug},
-      {"info",    logging::trivial::severity_level::info},
-      {"warning", logging::trivial::severity_level::warning},
-      {"error",   logging::trivial::severity_level::error},
-      {"fatal",   logging::trivial::severity_level::fatal}
-    }
-  };
-  std::string severity_str { std::getenv("LOG_LEVEL") ?: "info" };
-  logging::trivial::severity_level severity;
-  auto entry = levels.find(severity_str);
-  if (entry != levels.end()) {
-    severity = entry->second;
-  } else {
-    std::cerr << severity_str << ": Not a valid log level" << std::endl;
-    std::exit(1);
-  }
-  logging::core::get()->set_filter
-  (
-    logging::trivial::severity >= severity
-  );
-}
 
 using namespace markdups;
 
@@ -62,14 +31,14 @@ void process(
       while(std::getline(line_stream, tkn, SAM_delimiter)) {
         fields.push_back(tkn);
       }
-      std::cout << fields[0] << std::endl;
+      out << fields[0] << std::endl;
     }
   }
 }
 
 int main(int argc, char* argv[]) {
 
-  logging_init();
+  spdlog::cfg::load_env_levels();
 
   argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
 
@@ -77,7 +46,7 @@ int main(int argc, char* argv[]) {
     "Read a SAM file from STDIN, mark duplicates in a single pass and stream "
     "processed records to STDOUT. Input must begin with a valid SAM header "
     "followed by qname-grouped records. Default log level is 'info' — set to "
-    "something else (e.g. 'warning') with the LOG_LEVEL environment variable.");
+    "something else (e.g. 'debug') via SPDLOG_LEVEL environment variable.");
 
   cli.add_argument("--input")
     .help("Input file. [default: STDIN]")
