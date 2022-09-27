@@ -401,7 +401,7 @@ def unmarkdup(record: List[str]) -> None:
         record: list of SAM record str tokens.
     """
     flag = int(record[1])
-    if flag | FLAG_DUPLICATE:
+    if flag & FLAG_DUPLICATE:
         record[1] = str(flag ^ FLAG_DUPLICATE)
         pg_old, pg_new = None, f'{PGTAG}:{PGID}'
         for i, opt in enumerate(record[SAM_OPTS_IDX:], SAM_OPTS_IDX):
