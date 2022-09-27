@@ -23,18 +23,26 @@ void process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    std::vector<std::string> cli_args,
     unsigned reads_per_template,
     bool strip_previous) {
   
+  bool header_done { false };
   uint64_t n_qname { 0 };
   std::string qname_prev { "" };
   std::string qname;
+  std::string header_last { "" };
   std::vector<std::vector<std::string>> qname_group;
 
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
       out << line << std::endl;
+      header_last = line;
     } else {
+      if (!header_done) {
+        pgline(out, header_last, cli_args);
+        header_done = true;
+      }
       std::vector<std::string> fields { split(line, SAM_delimiter) };
       qname = fields[0];
       if (qname != qname_prev) {
@@ -53,6 +61,25 @@ void process_input_stream(
   }
   // handle the last group
   process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
+}
+
+// Write @PG line to the output stream; to be called after all existing header
+// lines have been processed.
+// 'header_last' is the existing last line of the header, which may contain a
+// previous @PG entry.
+// 'cli_args' is a string vector of argv.
+void pgline(
+    std::ostream& out,
+    std::string header_last,
+    std::vector<std::string> cli_args) {
+  std::string cl { "CL:" + join(cli_args, ' ') };
+  std::vector<std::string> tags {
+    "ID:" + pgid,
+    "PN:" + pgid,
+    "CL:" + join(cli_args, ' '),
+    "VN:" + STREAMMD_VERSION
+  }
+  out << join() << std::endl;
 }
 
 // Process a qname group of records; each record a vector of string fields.
@@ -170,7 +197,7 @@ void update_dup_status(std::vector<std::string>& read, bool set) {
 void write(
     std::ostream& out,
     const std::vector<std::string>& sam_record) {
-  unsigned long i {1}, imax { sam_record.size() };
+  unsigned long i { 1 }, imax { sam_record.size() };
   for (auto & field : sam_record) {
     out << field;
     if (i < imax) { out << SAM_delimiter; }
@@ -244,6 +271,7 @@ int main(int argc, char* argv[]) {
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<float>("-p") };
   auto bf { bloomfilter::BloomFilter(n, p) };
+  std::vector<std::string> args(argv, argv + argc);
 
   auto infname = cli.present("--input");
   auto outfname = cli.present("--output");
@@ -261,6 +289,7 @@ int main(int argc, char* argv[]) {
       }() : std::cin,
       outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout,
       bf,
+      args,
       cli.get<bool>("--single") ? 1 : 2,
       cli.get<bool>("--strip-previous")
   );

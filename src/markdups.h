@@ -27,10 +27,10 @@ const std::string default_metrics { pgid + "-metrics.json" };
 const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
 const uint64_t default_n { 1000000000 };
-const unsigned short flag_unmapped = 4;
-const unsigned short flag_reverse = 16;
-const unsigned short flag_secondary = 256;
-const unsigned short flag_duplicate = 1024;
+const unsigned short flag_unmapped      = 4;
+const unsigned short flag_reverse       = 16;
+const unsigned short flag_secondary     = 256;
+const unsigned short flag_duplicate     = 1024;
 const unsigned short flag_supplementary = 2048;
 const unsigned short sam_opts_idx = 11;
 
@@ -78,6 +78,7 @@ void process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    std::vector<std::string> cli_args,
     unsigned reads_per_template = 2,
     bool strip_previous = false);
 
