@@ -13,6 +13,8 @@
 #include "markdups.h"
 #include "version.h"
 
+using end_t = std::tuple<std::string, uint32_t, char>;
+
 namespace markdups {
 
 // Orchestrate the reading, dupe marking, and writing.
@@ -53,19 +55,29 @@ void process(
 // Mark duplicates in-place.
 void mark_duplicates(
     std::vector<std::vector<std::string>>& qname_group,
-    int& reads_per_template,
+    int reads_per_template,
     bloomfilter::BloomFilter& bf){
-  std::vector<std::tuple<std::string, uint32_t, char>> ends;
-  readends(qname_group, ends);
+  std::vector<end_t> ends { readends(qname_group) };
+  std::vector<std::string> ends_str;
   for (auto end : ends) {
-    std::cout << std::get<0>(end) << "_" << std::get<1>(end) << "_" << std::get<2>(end) << std::endl;
+    std::string end_str { std::get<0>(end) };
+    // Place F|R next because rname can end in a digit and we need string
+    // values that distinguish between ("chr1", 1234) and ("chr11", 234) 
+    end_str += std::get<2>(end);
+    end_str += std::to_string(std::get<1>(end));
+    ends_str.push_back(end_str);
+    std::cout << end_str << std::endl;
   }
 }
 
 // Calculate read ends.
-void readends(
-    std::vector<std::vector<std::string>>& qname_group,
-    std::vector<std::tuple<std::string, uint32_t, char>>& ends) {
+// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
+// vector of them is in coordinate-sorted order. Unmapped ends sort last by
+// construction.
+std::vector<end_t> readends(
+    const std::vector<std::vector<std::string>>& qname_group) {
+
+  std::vector<end_t> ends;
 
   for (auto read : qname_group) {
     auto flag      = stoi(read[1]);
@@ -94,10 +106,8 @@ void readends(
       std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
       std::sregex_iterator end;
       while (iter != end){
-        int num { stoi((*iter)[1]) };
-        const char op { std::string((*iter)[2]).c_str()[0] };
-        if (consumes_reference.count(op)) {
-          ref_end += num;
+        if (consumes_reference.count((*iter)[2])) {
+          ref_end += stoi((*iter)[1]);
         }
         ++iter;
       }
@@ -105,6 +115,7 @@ void readends(
     }
   }
   sort(ends.begin(), ends.end());
+  return ends;
 }
 
 // Write out records.
@@ -120,6 +131,7 @@ void write(
 }
 
 using namespace markdups;
+
 int main(int argc, char* argv[]) {
 
   spdlog::set_default_logger(spdlog::stderr_color_st("main"));
