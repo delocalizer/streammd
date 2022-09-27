@@ -56,9 +56,23 @@ inline std::vector<std::string> split(
   return elems;
 }
 
+inline std::string ends_to_string(std::vector<end_t> ends) {
+  std::string ends_str;
+  for (auto end : ends) {
+    ends_str += std::get<0>(end);
+    // Place F|R next because rname can end in a digit and we need string
+    // values that distinguish between ("chr1", 1234) and ("chr11", 234) 
+    ends_str += std::get<2>(end);
+    ends_str += std::to_string(std::get<1>(end));
+    // Ditto, in case the next rname starts with a digit
+    ends_str += "_";
+  }
+  return ends_str;
+}
+
 void mark_duplicates(
     std::vector<std::vector<std::string>>& qname_group,
-    int reads_per_template,
+    unsigned reads_per_template,
     bloomfilter::BloomFilter& bf);
 
 std::vector<end_t> readends(

@@ -40,33 +40,43 @@ void process(
         if (n_qname % log_interval == 0) {
           spdlog::debug("qnames read: {0}", n_qname); 
         }
-        mark_duplicates(qname_group, reads_per_template, bf);
-        //write(qname_group, out);
+        if (qname_group.size()) {
+          mark_duplicates(qname_group, reads_per_template, bf);
+          write(qname_group, out);
+        }
         qname_group.clear();
         qname_prev = qname;
       }
       qname_group.push_back(fields);
     }
   }
+  // process the last group
   mark_duplicates(qname_group, reads_per_template, bf);
-  //write(qname_group, out);
+  write(qname_group, out);
 }
 
 // Mark duplicates in-place.
 void mark_duplicates(
     std::vector<std::vector<std::string>>& qname_group,
-    int reads_per_template,
+    unsigned reads_per_template,
     bloomfilter::BloomFilter& bf){
   std::vector<end_t> ends { readends(qname_group) };
-  std::vector<std::string> ends_str;
-  for (auto end : ends) {
-    std::string end_str { std::get<0>(end) };
-    // Place F|R next because rname can end in a digit and we need string
-    // values that distinguish between ("chr1", 1234) and ("chr11", 234) 
-    end_str += std::get<2>(end);
-    end_str += std::to_string(std::get<1>(end));
-    ends_str.push_back(end_str);
-    std::cout << end_str << std::endl;
+  if (ends.size() != reads_per_template) {
+    std::string err = (reads_per_template == 1)
+      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
+      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
+    spdlog::error(err, qname_group[0][0], ends.size());
+    exit(1);
+  }
+  // sort order => if 1st is unmapped all are, so do nothing.
+  if (ends[0] == unmapped) { return; }
+  std::string ends_str { ends_to_string(ends) };
+  // ends already seen => dupe
+  if (!bf.add(ends_str)) {
+    for (auto & read : qname_group) {
+      auto flag { stoi(read[1]) };
+      read[1] = std::to_string(flag | flag_duplicate);
+    }
   }
 }
 
@@ -209,7 +219,7 @@ int main(int argc, char* argv[]) {
         return inf;
       }() : std::cin,
       outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout,
-      cli.get<bool>("--single") ? 1 : 2,
+      cli.get<bool>("--single") ? unsigned(1) : unsigned(2),
       bf
   );
 }
