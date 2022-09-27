@@ -17,12 +17,14 @@ using end_t = std::tuple<std::string, uint32_t, char>;
 
 namespace markdups {
 
-// Orchestrate the reading, dupe marking, and writing.
-void process(
+// Process the input stream. Header lines are written directly to the output
+// stream; reads are dispatched in qname groups for further processing. 
+void process_input_stream(
     std::istream& in,
     std::ostream& out,
-    int reads_per_template,
-    bloomfilter::BloomFilter& bf) {
+    bloomfilter::BloomFilter& bf,
+    unsigned reads_per_template,
+    bool strip_previous) {
   
   uint64_t n_qname { 0 };
   std::string qname_prev { "" };
@@ -41,8 +43,7 @@ void process(
           spdlog::debug("qnames read: {0}", n_qname); 
         }
         if (qname_group.size()) {
-          mark_duplicates(qname_group, reads_per_template, bf);
-          write(qname_group, out);
+          process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
         }
         qname_group.clear();
         qname_prev = qname;
@@ -50,17 +51,21 @@ void process(
       qname_group.push_back(fields);
     }
   }
-  // process the last group
-  mark_duplicates(qname_group, reads_per_template, bf);
-  write(qname_group, out);
+  // handle the last group
+  process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
 }
 
-// Mark duplicates in-place.
-void mark_duplicates(
+// Process a qname group of records; each record a vector of string fields.
+void process_qname_group(
     std::vector<std::vector<std::string>>& qname_group,
+    std::ostream& out,
+    bloomfilter::BloomFilter& bf,
     unsigned reads_per_template,
-    bloomfilter::BloomFilter& bf){
-  std::vector<end_t> ends { readends(qname_group) };
+    bool strip_previous) {
+
+  // calculate ends
+  std::vector<end_t> ends { template_ends(qname_group) };
+
   if (ends.size() != reads_per_template) {
     std::string err = (reads_per_template == 1)
       ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
@@ -68,23 +73,39 @@ void mark_duplicates(
     spdlog::error(err, qname_group[0][0], ends.size());
     exit(1);
   }
-  // sort order => if 1st is unmapped all are, so do nothing.
-  if (ends[0] == unmapped) { return; }
+
   std::string ends_str { ends_to_string(ends) };
-  // ends already seen => dupe
-  if (!bf.add(ends_str)) {
+  if (ends[0] == unmapped) {
+    // sort order => if 1st is unmapped all are, so do nothing.
+  } else if (!bf.add(ends_str)) {
+    // ends already seen => dupe
     for (auto & read : qname_group) {
-      auto flag { stoi(read[1]) };
-      read[1] = std::to_string(flag | flag_duplicate);
+      // set the flag
+      read[1] = std::to_string(stoi(read[1]) | flag_duplicate);
+      // update PG:Z
+      auto imax { read.size() - 1 };
+      std::string pg_old;
+      for (auto i = sam_opts_idx; i <= imax; i++) {
+        if (read[i].rfind(pgtag, 0) == 0) {
+          pg_old = read[i];
+          read[i] = pgtag_val;
+        }
+      }
+      if (pg_old.empty()) {
+        read.push_back(pgtag_val);
+      }
     }
+  } else if (strip_previous) {
+
   }
+  write(qname_group, out);
 }
 
-// Calculate read ends.
+// Calculate template ends from the primary alignments of the qname group.
 // Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
 // vector of them is in coordinate-sorted order. Unmapped ends sort last by
 // construction.
-std::vector<end_t> readends(
+std::vector<end_t> template_ends(
     const std::vector<std::vector<std::string>>& qname_group) {
 
   std::vector<end_t> ends;
@@ -130,7 +151,7 @@ std::vector<end_t> readends(
 
 // Write out records.
 void write(
-  std::vector<std::vector<std::string>>& qname_group,
+    const std::vector<std::vector<std::string>>& qname_group,
     std::ostream& out) {
   for (auto record : qname_group) {
     std::string line { join(record, SAM_delimiter) };
@@ -147,7 +168,7 @@ int main(int argc, char* argv[]) {
   spdlog::set_default_logger(spdlog::stderr_color_st("main"));
   spdlog::cfg::load_env_levels();
 
-  argparse::ArgumentParser cli("streammd", STREAMMD_VERSION);
+  argparse::ArgumentParser cli(pgid, STREAMMD_VERSION);
 
   cli.add_description(
     "Read a SAM file from STDIN, mark duplicates in a single pass and stream "
@@ -209,7 +230,7 @@ int main(int argc, char* argv[]) {
   std::ifstream inf;
   std::ofstream outf;
 
-  process(
+  process_input_stream(
       infname ? [&]() -> std::istream& {
         inf.open(*infname);
         if (!inf) {
@@ -219,7 +240,8 @@ int main(int argc, char* argv[]) {
         return inf;
       }() : std::cin,
       outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout,
-      cli.get<bool>("--single") ? unsigned(1) : unsigned(2),
-      bf
+      bf,
+      cli.get<bool>("--single") ? 1 : 2,
+      cli.get<bool>("--strip-previous")
   );
 }
