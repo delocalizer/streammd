@@ -80,25 +80,17 @@ void process_qname_group(
   } else if (!bf.add(ends_str)) {
     // ends already seen => dupe
     for (auto & read : qname_group) {
-      // set the flag
-      read[1] = std::to_string(stoi(read[1]) | flag_duplicate);
-      // update PG:Z
-      auto imax { read.size() - 1 };
-      std::string pg_old;
-      for (auto i = sam_opts_idx; i <= imax; i++) {
-        if (read[i].rfind(pgtag, 0) == 0) {
-          pg_old = read[i];
-          read[i] = pgtag_val;
-        }
-      }
-      if (pg_old.empty()) {
-        read.push_back(pgtag_val);
-      }
+      update_dup_status(read, true);
     }
   } else if (strip_previous) {
-
+    for (auto & read : qname_group) {
+      update_dup_status(read, false);
+    }
   }
-  write(qname_group, out);
+  // write to output
+  for (auto record : qname_group) {
+    write(out, record);
+  }
 }
 
 // Calculate template ends from the primary alignments of the qname group.
@@ -149,14 +141,42 @@ std::vector<end_t> template_ends(
   return ends;
 }
 
-// Write out records.
-void write(
-    const std::vector<std::vector<std::string>>& qname_group,
-    std::ostream& out) {
-  for (auto record : qname_group) {
-    std::string line { join(record, SAM_delimiter) };
-    out << line << std::endl;
+// Update the duplicate flag and PG:Z tag value on a read.
+// When 'set' is true the flag is set, otherwise it is unset.
+void update_dup_status(std::vector<std::string>& read, bool set) {
+  auto prev = read[1];
+  auto flag = stoi(prev);
+  // update the flag
+  read[1] = set
+    ? std::to_string(flag | flag_duplicate)
+    : std::to_string(flag ^ flag_duplicate);
+  // update PG:Z if flag changed
+  if (read[1] != prev) {
+    auto imax { read.size() - 1 };
+    std::string pg_old;
+    for (auto i = sam_opts_idx; i <= imax; i++) {
+      if (read[i].rfind(pgtag, 0) == 0) {
+        pg_old = read[i];
+        read[i] = pgtag_val;
+      }
+    }
+    if (pg_old.empty()) {
+      read.push_back(pgtag_val);
+    }
   }
+}
+
+// Write out SAM records.
+void write(
+    std::ostream& out,
+    const std::vector<std::string>& sam_record) {
+  unsigned long i {1}, imax { sam_record.size() };
+  for (auto & field : sam_record) {
+    out << field;
+    if (i < imax) { out << SAM_delimiter; }
+    i++;
+  }
+  out << std::endl;
 }
 
 }
