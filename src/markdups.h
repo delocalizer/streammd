@@ -20,7 +20,10 @@ const std::regex re_cigar { R"((?:(\d+)([MIDNSHPX=])))" };
 const std::regex re_leading_s { R"(^(\d+)S)" };                       
 const std::regex re_trailing_s { R"((\d+)S$)" };
 const std::set<std::string> consumes_reference { "M", "D", "N", "=", "X" };
-const std::string default_metrics { "streammd-metrics.json" };
+const std::string pgid { "streammd"  };
+const std::string pgtag { "PG:Z" };
+const std::string pgtag_val { pgtag + ":" + pgid };
+const std::string default_metrics { pgid + "-metrics.json" };
 const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
 const uint64_t default_n { 1000000000 };
@@ -29,6 +32,7 @@ const unsigned short flag_reverse = 16;
 const unsigned short flag_secondary = 256;
 const unsigned short flag_duplicate = 1024;
 const unsigned short flag_supplementary = 2048;
+const unsigned short sam_opts_idx = 11;
 
 inline std::string join(
     const std::vector<std::string>& elems,
@@ -70,22 +74,25 @@ inline std::string ends_to_string(std::vector<end_t> ends) {
   return ends_str;
 }
 
-void mark_duplicates(
-    std::vector<std::vector<std::string>>& qname_group,
-    unsigned reads_per_template,
-    bloomfilter::BloomFilter& bf);
-
-std::vector<end_t> readends(
-    const std::vector<std::vector<std::string>>& qname_group);
-
-void process(
+void process_input_stream(
     std::istream& in,
     std::ostream& out,
-    int reads_per_template,
-    bloomfilter::BloomFilter& bf);
+    bloomfilter::BloomFilter& bf,
+    unsigned reads_per_template = 2,
+    bool strip_previous = false);
+
+void process_qname_group(
+    std::vector<std::vector<std::string>>& qname_group,
+    std::ostream& out,
+    bloomfilter::BloomFilter& bf,
+    unsigned reads_per_template = 2,
+    bool strip_previous = false);
+
+std::vector<end_t> template_ends(
+    const std::vector<std::vector<std::string>>& qname_group);
 
 void write(
-    std::vector<std::vector<std::string>>& qname_group,
+    const std::vector<std::vector<std::string>>& qname_group,
     std::ostream& out);
 }
 
