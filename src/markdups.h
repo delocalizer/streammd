@@ -91,9 +91,9 @@ void process_qname_group(
 std::vector<end_t> template_ends(
     const std::vector<std::vector<std::string>>& qname_group);
 
-void write(
-    const std::vector<std::vector<std::string>>& qname_group,
-    std::ostream& out);
-}
+void update_dup_status(std::vector<std::string>& read, bool set = true);
 
+void write(std::ostream& out, const std::vector<std::string>& sam_record);
+
+}
 #endif // STREAMMD_MARKDUPS_H_
