@@ -18,6 +18,7 @@ const char SAM_delimiter { '\t' };
 const float default_p { 0.000001 };
 const std::regex re_cigar { R"((?:(\d+)([MIDNSHPX=])))" };
 const std::regex re_leading_s { R"(^(\d+)S)" };                       
+const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::regex re_trailing_s { R"((\d+)S$)" };
 const std::set<std::string> consumes_reference { "M", "D", "N", "=", "X" };
 const std::string pgid { "streammd"  };
@@ -81,6 +82,11 @@ void process_input_stream(
     std::vector<std::string> cli_args,
     unsigned reads_per_template = 2,
     bool strip_previous = false);
+
+void pgline(
+    std::ostream& out,
+    const std::string& header_last,
+    const std::vector<std::string>& cli_args);
 
 void process_qname_group(
     std::vector<std::vector<std::string>>& qname_group,

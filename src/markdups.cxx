@@ -65,21 +65,31 @@ void process_input_stream(
 
 // Write @PG line to the output stream; to be called after all existing header
 // lines have been processed.
-// 'header_last' is the existing last line of the header, which may contain a
+// 'header_last' is the currently last line of the header, which may contain a
 // previous @PG entry.
 // 'cli_args' is a string vector of argv.
 void pgline(
     std::ostream& out,
-    std::string header_last,
-    std::vector<std::string> cli_args) {
+    const std::string& header_last,
+    const std::vector<std::string>& cli_args) {
   std::string cl { "CL:" + join(cli_args, ' ') };
   std::vector<std::string> tags {
+    "@PG",
     "ID:" + pgid,
     "PN:" + pgid,
     "CL:" + join(cli_args, ' '),
-    "VN:" + STREAMMD_VERSION
+    "VN:" + std::string(STREAMMD_VERSION)
+  };
+  if (header_last.rfind("@PG\t", 0) == 0) {
+    std::smatch sm;
+    regex_search(header_last, sm, re_pgid);
+    if (sm.empty()) {
+      spdlog::warn("{}: invalid @PG line lacks ID: tag", header_last);
+    } else {
+      tags.push_back("PP:" + std::string(sm[1]));
+    }
   }
-  out << join() << std::endl;
+  out << join(tags, '\t') << std::endl;
 }
 
 // Process a qname group of records; each record a vector of string fields.
