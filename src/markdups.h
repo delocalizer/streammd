@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <regex>
+#include <set>
 #include <string>
 #include <tuple>
 

@@ -5,7 +5,7 @@
 #include <string>
 #include <tuple>
 
-#include <boost/dynamic_bitset/dynamic_bitset.hpp>
+#include <dynamic_bitset/dynamic_bitset.hpp>
 
 namespace bloomfilter {
 
@@ -41,7 +41,7 @@ class BloomFilter {
   int k_;
 
   void hash(const std::string& item, uint64_t* buf);
-  std::unique_ptr<boost::dynamic_bitset<>> bitset;
+  std::unique_ptr<sul::dynamic_bitset<>> bitset;
   
 };
 
