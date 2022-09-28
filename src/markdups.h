@@ -39,13 +39,15 @@ const unsigned short sam_opts_idx = 11;
 inline std::string join(
     const std::vector<std::string>& elems,
     const char sep,
-    int reserve=1024) {
+    const char end = '\0') {
   std::string joined;
-  joined.reserve(reserve);
   auto stop { elems.end() };
   for (auto i = elems.begin(); i != stop; ++i) {
     joined += *i;
     if (i != stop - 1) { joined += sep; }
+  }
+  if (end != '\0') {
+    joined += end;
   }
   return joined;
 }

@@ -154,9 +154,7 @@ void pgline(
       tags.emplace_back("PP:" + std::string(sm[1]));
     }
   }
-  std::string outline { join(tags, '\t') };
-  outline += "\n";
-  out << outline;
+  out << join(tags, SAM_delimiter, '\n');
 }
 
 // Process a qname group of records; each record a vector of string fields.
@@ -193,9 +191,7 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    std::string outline { join(record, SAM_delimiter) };
-    outline += "\n";
-    out << outline;
+    out << join(record, SAM_delimiter, '\n');
   }
 }
 
