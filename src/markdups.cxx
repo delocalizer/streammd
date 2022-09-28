@@ -52,11 +52,11 @@ void process_input_stream(
         }
         if (qname_group.size()) {
           process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
+          qname_group.clear();
         }
-        qname_group.clear();
         qname_prev = qname;
       }
-      qname_group.push_back(fields);
+      qname_group.emplace_back(fields);
     }
   }
   // handle the last group
@@ -86,7 +86,7 @@ void pgline(
     if (sm.empty()) {
       spdlog::warn("{}: invalid @PG line lacks ID: tag", header_last);
     } else {
-      tags.push_back("PP:" + std::string(sm[1]));
+      tags.emplace_back("PP:" + std::string(sm[1]));
     }
   }
   out << join(tags, '\t') << std::endl;
@@ -126,7 +126,8 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    write(out, record);
+    //write(out, record);
+    out << join(record, SAM_delimiter) << std::endl;
   }
 }
 
@@ -150,13 +151,13 @@ std::vector<end_t> template_ends(
     }
     // unmapped
     if (flag & flag_unmapped){
-      ends.push_back(unmapped);
+      ends.emplace_back(unmapped);
     // forward
     } else if (!(flag & flag_reverse)) {
       std::smatch sm;
       regex_search(cigar, sm, re_leading_s);
       int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-      ends.push_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
+      ends.emplace_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
     // reverse
     } else {
       std::smatch sm;
@@ -171,7 +172,7 @@ std::vector<end_t> template_ends(
         }
         ++iter;
       }
-      ends.push_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
+      ends.emplace_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
     }
   }
   sort(ends.begin(), ends.end());
@@ -198,22 +199,9 @@ void update_dup_status(std::vector<std::string>& read, bool set) {
       }
     }
     if (pg_old.empty()) {
-      read.push_back(pgtag_val);
+      read.emplace_back(pgtag_val);
     }
   }
-}
-
-// Write out SAM records.
-void write(
-    std::ostream& out,
-    const std::vector<std::string>& sam_record) {
-  unsigned long i { 1 }, imax { sam_record.size() };
-  for (auto & field : sam_record) {
-    out << field;
-    if (i < imax) { out << SAM_delimiter; }
-    i++;
-  }
-  out << std::endl;
 }
 
 }
