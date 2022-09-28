@@ -97,9 +97,9 @@ void process_input_stream(
     out << line << std::endl;
   }
   */ 
-
+                                                  // 3-4 seconds getline
   for (std::string line; std::getline(in, line);) {
-    if (line.rfind("@", 0) == 0) {
+    if (line.rfind("@", 0) == 0) {                // 0.5 seconds
       line += "\n";
       out << line;
       header_last = line;
@@ -108,11 +108,12 @@ void process_input_stream(
         pgline(out, header_last, cli_args);
         header_done = true;
       }
+                                                  // 15 seconds
       std::vector<std::string> fields { split(line, SAM_delimiter) };
       qname = fields[0];
       if (qname != qname_prev) {
         n_qname += 1;
-        if (n_qname % log_interval == 0) {
+        if (n_qname % log_interval == 0) {        // < 1 second
           spdlog::debug("qnames read: {0}", n_qname); 
         }
         if (qname_group.size()) {
@@ -121,7 +122,7 @@ void process_input_stream(
         }
         qname_prev = qname;
       }
-      qname_group.emplace_back(fields);
+      qname_group.emplace_back(fields);           // 5-6 seconds
     }
   }
   // handle the last group
@@ -164,10 +165,10 @@ void process_qname_group(
     unsigned reads_per_template,
     bool strip_previous) {
 
-  // calculate ends
+  // calculate ends                               // 27 seconds
   std::vector<end_t> ends { template_ends(qname_group) };
 
-  if (ends.size() != reads_per_template) {
+  if (ends.size() != reads_per_template) {        // < 1 sec
     std::string err = (reads_per_template == 1)
       ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
       : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
@@ -175,13 +176,13 @@ void process_qname_group(
     exit(1);
   }
 
-  std::string ends_str { ends_to_string(ends) };
+  std::string ends_str { ends_to_string(ends) };  // < 1 sec
   if (ends[0] == unmapped) {
     // sort order => if 1st is unmapped all are, so do nothing.
-  } else if (!bf.add(ends_str)) {
+  } else if (!bf.add(ends_str)) {                 // <- 2-4 seconds (n=1000)
     // ends already seen => dupe
     for (auto & read : qname_group) {
-      update_dup_status(read, true);
+      update_dup_status(read, true);              // <- 8-10 seconds
     }
   } else if (strip_previous) {
     for (auto & read : qname_group) {
@@ -190,7 +191,7 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    out << join(record, SAM_delimiter, '\n');
+    out << join(record, SAM_delimiter, '\n');     // <- 26 seconds (join + <<)
   }
 }
 
