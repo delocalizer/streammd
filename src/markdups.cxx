@@ -239,7 +239,7 @@ std::vector<end_t> template_ends(
       ends.emplace_back(rname, ref_end + trailing_s, 'R');
     }
   }
-  sort(ends.begin(), ends.end());
+  sort(ends.begin(), ends.end());                 // 2-3 seconds?
   return ends;
 }
 
@@ -248,18 +248,19 @@ std::vector<end_t> template_ends(
 void update_dup_status(std::vector<std::string>& read, bool set) {
   auto prev = read[1];
   auto flag = stoi(prev);
-  // update the flag
+  // update the flag                              // < 1 second
   read[1] = set
     ? std::to_string(flag | flag_duplicate)
     : std::to_string(flag ^ flag_duplicate);
-  // update PG:Z if flag changed
+  // update PG:Z if flag changed                  // 8-9 seconds
   if (read[1] != prev) {
-    auto imax { read.size() - 1 };
+    auto start { read.begin() };
+    std::advance(start, sam_opts_idx);
     std::string pg_old;
-    for (auto i = sam_opts_idx; i <= imax; i++) {
-      if (read[i].rfind(pgtag, 0) == 0) {
-        pg_old = read[i];
-        read[i] = pgtag_val;
+    for (auto i = start; i != read.end(); ++i) {
+      if (i->rfind(pgtag, 0) == 0) {
+        pg_old = *i;
+        *i = pgtag_val;
       }
     }
     if (pg_old.empty()) {
