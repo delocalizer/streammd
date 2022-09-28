@@ -137,7 +137,6 @@ void pgline(
     std::ostream& out,
     const std::string& header_last,
     const std::vector<std::string>& cli_args) {
-  std::string cl { "CL:" + join(cli_args, ' ') };
   std::vector<std::string> tags {
     "@PG",
     "ID:" + pgid,
@@ -221,7 +220,7 @@ std::vector<end_t> template_ends(
       std::smatch sm;
       regex_search(cigar, sm, re_leading_s);
       int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-      ends.emplace_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
+      ends.emplace_back(rname, ref_start - leading_s, 'F');
     // reverse
     } else {
       std::smatch sm;
@@ -236,7 +235,7 @@ std::vector<end_t> template_ends(
         }
         ++iter;
       }
-      ends.emplace_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
+      ends.emplace_back(rname, ref_end + trailing_s, 'R');
     }
   }
   sort(ends.begin(), ends.end());
