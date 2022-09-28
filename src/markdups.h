@@ -42,11 +42,10 @@ inline std::string join(
     int reserve=1024) {
   std::string joined;
   joined.reserve(reserve);
-  unsigned long i {1}, imax { elems.size() };
-  for (auto & elem : elems) {
-    joined += elem;
-    if (i < imax) { joined += sep; }
-    i++;
+  auto stop { elems.end() };
+  for (auto i = elems.begin(); i != stop; ++i) {
+    joined += *i;
+    if (i != stop - 1) { joined += sep; }
   }
   return joined;
 }
@@ -54,10 +53,14 @@ inline std::string join(
 inline std::vector<std::string> split(
     const std::string& joined, const char sep) {
   std::vector<std::string> elems;
-  std::stringstream joined_{ joined };
-  std::string tkn;
-  while(std::getline(joined_, tkn, sep)) {
-    elems.push_back(tkn);
+  auto stop { joined.end() };
+  for (auto i = joined.begin(); i != stop; ++i) {
+    auto j = i;
+    i = std::find(i, stop, sep);
+    elems.emplace_back(j, i);
+    if (i == stop) {
+      break;
+    }
   }
   return elems;
 }
@@ -100,8 +103,6 @@ std::vector<end_t> template_ends(
     const std::vector<std::vector<std::string>>& qname_group);
 
 void update_dup_status(std::vector<std::string>& read, bool set = true);
-
-void write(std::ostream& out, const std::vector<std::string>& sam_record);
 
 }
 #endif // STREAMMD_MARKDUPS_H_
