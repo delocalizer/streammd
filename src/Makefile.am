@@ -12,3 +12,4 @@ streammd_LDADD = libbloomfilter.a
 noinst_LIBRARIES = libbloomfilter.a
 libbloomfilter_a_SOURCES = bloomfilter.cxx
 
+include_HEADERS = *.h

@@ -3,7 +3,7 @@
 #include <string>
 #include <tuple>
 
-#include <boost/dynamic_bitset/dynamic_bitset.hpp>
+#include <dynamic_bitset/dynamic_bitset.hpp>
 #include <xxhash_cpp/xxhash.hpp>
 #include <spdlog/spdlog.h>
 
@@ -15,7 +15,7 @@ namespace bloomfilter {
 BloomFilter::BloomFilter(uint64_t n, float p):  n_{n}, p_{p} {
   std::tie(m_, k_) = m_k_min(n_, p_);
   // dynamic_bitset constructor initializes all to 0
-  bitset = std::unique_ptr<boost::dynamic_bitset<>>(new boost::dynamic_bitset(m_));
+  bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
   spdlog::info("BloomFilter initialized with n={0} p={1} m={2} k={3}", n_, p_, m_, k_);
 }
 

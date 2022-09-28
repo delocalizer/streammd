@@ -287,6 +287,7 @@ int main(int argc, char* argv[]) {
   auto outfname = cli.present("--output");
   std::ifstream inf;
   std::ofstream outf;
+  std::ios::sync_with_stdio(false);
 
   process_input_stream(
       infname ? [&]() -> std::istream& {
