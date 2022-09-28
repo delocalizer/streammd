@@ -137,7 +137,6 @@ void pgline(
     std::ostream& out,
     const std::string& header_last,
     const std::vector<std::string>& cli_args) {
-  std::string cl { "CL:" + join(cli_args, ' ') };
   std::vector<std::string> tags {
     "@PG",
     "ID:" + pgid,
@@ -154,9 +153,7 @@ void pgline(
       tags.emplace_back("PP:" + std::string(sm[1]));
     }
   }
-  std::string outline { join(tags, '\t') };
-  outline += "\n";
-  out << outline;
+  out << join(tags, SAM_delimiter, '\n');
 }
 
 // Process a qname group of records; each record a vector of string fields.
@@ -193,9 +190,7 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    std::string outline { join(record, SAM_delimiter) };
-    outline += "\n";
-    out << outline;
+    out << join(record, SAM_delimiter, '\n');
   }
 }
 
@@ -225,7 +220,7 @@ std::vector<end_t> template_ends(
       std::smatch sm;
       regex_search(cigar, sm, re_leading_s);
       int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-      ends.emplace_back(std::make_tuple(rname, ref_start - leading_s, 'F'));
+      ends.emplace_back(rname, ref_start - leading_s, 'F');
     // reverse
     } else {
       std::smatch sm;
@@ -240,7 +235,7 @@ std::vector<end_t> template_ends(
         }
         ++iter;
       }
-      ends.emplace_back(std::make_tuple(rname, ref_end + trailing_s, 'R'));
+      ends.emplace_back(rname, ref_end + trailing_s, 'R');
     }
   }
   sort(ends.begin(), ends.end());
