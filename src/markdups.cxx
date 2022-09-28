@@ -83,9 +83,25 @@ void process_input_stream(
   }
   */
 
+  // And here we have it! This runs in ~ 20 seconds
+  // all important requirements:
+  // 1. un-syncing ios * 180s -> 70s
+  // 2. un-tie-ing stdin and stdout 70s -> 20s
+  // 3. appending "\n" to the string before calling <<
+  //    (calling: out << line << std::endl takes over 60 seconds...)
+  /*
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  for (std::string line; std::getline(in, line);) {
+    line += "\n";
+    out << line << std::endl;
+  }
+  */ 
+
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
-      out << line << std::endl;
+      line += "\n";
+      out << line;
       header_last = line;
     } else {
       if (!header_done) {
@@ -138,7 +154,9 @@ void pgline(
       tags.emplace_back("PP:" + std::string(sm[1]));
     }
   }
-  out << join(tags, '\t') << std::endl;
+  std::string outline { join(tags, '\t') };
+  outline += "\n";
+  out << outline;
 }
 
 // Process a qname group of records; each record a vector of string fields.
@@ -175,7 +193,9 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    out << join(record, SAM_delimiter) << std::endl;
+    std::string outline { join(record, SAM_delimiter) };
+    outline += "\n";
+    out << outline;
   }
 }
 
@@ -258,6 +278,9 @@ using namespace markdups;
 
 int main(int argc, char* argv[]) {
 
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+
   spdlog::set_default_logger(spdlog::stderr_color_st("main"));
   spdlog::cfg::load_env_levels();
 
@@ -323,7 +346,6 @@ int main(int argc, char* argv[]) {
   auto outfname = cli.present("--output");
   std::ifstream inf;
   std::ofstream outf;
-  std::ios::sync_with_stdio(false);
 
   process_input_stream(
       infname ? [&]() -> std::istream& {
