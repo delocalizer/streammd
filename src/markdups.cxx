@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -33,6 +36,52 @@ void process_input_stream(
   std::string qname;
   std::string header_last { "" };
   std::vector<std::vector<std::string>> qname_group;
+
+  // Use C stdio.h getline to fill a char buffer and output with C fputs
+  /* this takes ~ 5 seconds reading only; ~ 22 seconds r+w;
+  char *buffer;
+  size_t bufsize = 4096;
+  int characters;
+  buffer = (char *)malloc(bufsize * sizeof(char));
+  while ((characters = getline(&buffer, &bufsize, stdin)) > 0) {
+    // note c getline grabs \n also so we don't add it here
+    // fputs(buffer, stdout);
+  }
+  */
+
+  // Use C++ istream::getline to fill a char buffer and output with C fputs
+  /* this also takes ~ 5 seconds reading only; ~ 22 seconds r+w.
+  int maxbufsz {4096};
+  for (char buf[maxbufsz]; in.getline(buf, maxbufsz);) {
+    fputs(buf, stdout);
+    fputs("\n", stdout);
+  }
+  if (in.eof()) {
+    spdlog::trace("EOF");
+  } else {
+    spdlog::error("Malformed input — line too long?");
+  }
+  */
+
+  // Use C++ istream::getline to fill a char buffer and output with C++ <<
+  /* This took ~ 5 seconds reading only but 72(!) seconds r+w.
+  int maxbufsz {4096};
+  for (char buf[maxbufsz]; in.getline(buf, maxbufsz);) {
+    out << buf << std::endl;
+  }
+  if (in.eof()) {
+    spdlog::trace("EOF");
+  } else {
+    spdlog::error("Malformed input — line too long?");
+  }
+  */
+
+  // Use C++ istream::getline to create std::string and output with C++ << 
+  /* This took ~ 5 seconds reading only but 72(!) seconds r+w.
+  for (std::string line; std::getline(in, line);) {
+    out << line << std::endl;
+  }
+  */
 
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {
@@ -126,7 +175,6 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    //write(out, record);
     out << join(record, SAM_delimiter) << std::endl;
   }
 }
