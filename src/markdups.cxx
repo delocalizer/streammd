@@ -20,6 +20,58 @@ using end_t = std::tuple<std::string, uint32_t, char>;
 
 namespace markdups {
 
+SamRecord::SamRecord() {
+  std::string buffer;
+  buffer.reserve(1024);
+}
+
+// Read what we need and no more.
+void SamRecord::parse() {
+  if (buffer.empty()) {
+    spdlog::warn("Cannot parse empty buffer");
+    return;
+  }
+  size_t start, stop;
+
+  // Seatbelts off; we assume we've got good SAM records...
+
+  // qname
+  start=0; stop=buffer.find(SAM_delimiter, start);
+  qname_ = buffer.substr(start, stop - start);
+
+  // flag
+  start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  flagidx_ = start;                         // needed for update
+  flaglen_ = stop - start;                  // needed for update
+  flag_ = stoi(buffer.substr(flagidx_, flaglen_));
+
+  // rname
+  start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  rname_ = buffer.substr(start, stop - start);
+
+  // pos
+  start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  pos_ = stoi(buffer.substr(start, stop - start));
+
+  // cigar
+  start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  cigar_ = buffer.substr(start, stop - start);
+
+  // pg
+  start=stop+1; stop=buffer.find(pgtag_, start);
+  if (stop == std::string::npos) {
+    pgidx_ = buffer.length();
+    pglen_ = 0;
+  } else {
+    pgidx_ = stop + pgtaglen_;              // needed for update
+    stop=buffer.find(SAM_delimiter, pgidx_);
+    pglen_ = (stop == std::string::npos)    // needed for update
+             ? buffer.length() - pgidx_
+             : stop - pgidx_;
+  }
+}
+
 // Process the input stream. Header lines are written directly to the output
 // stream; reads are dispatched in qname groups for further processing. 
 void process_input_stream(
@@ -27,7 +79,7 @@ void process_input_stream(
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
     std::vector<std::string> cli_args,
-    unsigned reads_per_template,
+    size_t reads_per_template,
     bool strip_previous) {
   
   bool header_done { false };
@@ -35,7 +87,7 @@ void process_input_stream(
   std::string qname_prev { "" };
   std::string qname;
   std::string header_last { "" };
-  std::vector<std::vector<std::string>> qname_group;
+  std::vector<SamRecord> qname_group;
 
   // Use C stdio.h getline to fill a char buffer and output with C fputs
   /* this takes ~ 5 seconds reading only; ~ 22 seconds r+w;
@@ -97,6 +149,31 @@ void process_input_stream(
     out << line << std::endl;
   }
   */ 
+
+  for (SamRecord samrecord; std::getline(in, samrecord.buffer);) {
+    // header
+    if (samrecord.buffer[0] == '@') {
+      out << samrecord.buffer + "\n";
+      header_last = samrecord.buffer;
+    } else {
+      if (!header_done) {
+        pgline(out, header_last, cli_args);
+        header_done = true;
+      }
+      samrecord.parse();
+      std::string outline { samrecord.qname() };
+      outline += SAM_delimiter;
+      outline += samrecord.rname();
+      outline += SAM_delimiter;
+      outline += std::to_string(samrecord.pos());
+      outline += SAM_delimiter;
+      outline += samrecord.cigar();
+      outline += "\n";
+      std::cout << outline ;
+    }
+  }
+
+  /*
                                                   // 3-4 seconds getline
   for (std::string line; std::getline(in, line);) {
     if (line.rfind("@", 0) == 0) {                // 0.5 seconds
@@ -127,6 +204,7 @@ void process_input_stream(
   }
   // handle the last group
   process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
+  */
 }
 
 // Write @PG line to the output stream; to be called after all existing header
@@ -157,117 +235,117 @@ void pgline(
   out << join(tags, SAM_delimiter, '\n');
 }
 
-// Process a qname group of records; each record a vector of string fields.
-void process_qname_group(
-    std::vector<std::vector<std::string>>& qname_group,
-    std::ostream& out,
-    bloomfilter::BloomFilter& bf,
-    unsigned reads_per_template,
-    bool strip_previous) {
-
-  // calculate ends                               // 27 seconds
-  std::vector<end_t> ends { template_ends(qname_group) };
-
-  if (ends.size() != reads_per_template) {        // < 1 sec
-    std::string err = (reads_per_template == 1)
-      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
-      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
-    spdlog::error(err, qname_group[0][0], ends.size());
-    exit(1);
-  }
-
-  std::string ends_str { ends_to_string(ends) };  // < 1 sec
-  if (ends[0] == unmapped) {
-    // sort order => if 1st is unmapped all are, so do nothing.
-  } else if (!bf.add(ends_str)) {                 // <- 2-4 seconds (n=1000)
-    // ends already seen => dupe
-    for (auto & read : qname_group) {
-      update_dup_status(read, true);              // <- 8-10 seconds
-    }
-  } else if (strip_previous) {
-    for (auto & read : qname_group) {
-      update_dup_status(read, false);
-    }
-  }
-  // write to output
-  for (auto record : qname_group) {
-    out << join(record, SAM_delimiter, '\n');     // <- 26 seconds (join + <<)
-  }
-}
-
-// Calculate template ends from the primary alignments of the qname group.
-// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
-// vector of them is in coordinate-sorted order. Unmapped ends sort last by
-// construction.
-std::vector<end_t> template_ends(
-    const std::vector<std::vector<std::string>>& qname_group) {
-
-  std::vector<end_t> ends;
-
-  for (auto read : qname_group) {
-    auto flag      = stoi(read[1]);
-    auto rname     = read[2];
-    auto ref_start = stoi(read[3]);
-    auto cigar     = read[5];
-    // use only primary alignments for end calculation
-    if ((flag & flag_secondary) || (flag & flag_supplementary)){
-      continue;
-    }
-    // unmapped
-    if (flag & flag_unmapped){
-      ends.emplace_back(unmapped);
-    // forward
-    } else if (!(flag & flag_reverse)) {
-      std::smatch sm;
-      regex_search(cigar, sm, re_leading_s);
-      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-      ends.emplace_back(rname, ref_start - leading_s, 'F');
-    // reverse
-    } else {
-      std::smatch sm;
-      regex_search(cigar, sm, re_trailing_s);
-      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
-      int ref_end { ref_start };
-      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
-      std::sregex_iterator end;
-      while (iter != end){
-        if (consumes_reference.count((*iter)[2])) {
-          ref_end += stoi((*iter)[1]);
-        }
-        ++iter;
-      }
-      ends.emplace_back(rname, ref_end + trailing_s, 'R');
-    }
-  }
-  sort(ends.begin(), ends.end());                 // 2-3 seconds?
-  return ends;
-}
-
-// Update the duplicate flag and PG:Z tag value on a read.
-// When 'set' is true the flag is set, otherwise it is unset.
-void update_dup_status(std::vector<std::string>& read, bool set) {
-  auto prev = read[1];
-  auto flag = stoi(prev);
-  // update the flag                              // < 1 second
-  read[1] = set
-    ? std::to_string(flag | flag_duplicate)
-    : std::to_string(flag ^ flag_duplicate);
-  // update PG:Z if flag changed                  // 8-9 seconds
-  if (read[1] != prev) {
-    auto start { read.begin() };
-    std::advance(start, sam_opts_idx);
-    std::string pg_old;
-    for (auto i = start; i != read.end(); ++i) {
-      if (i->rfind(pgtag, 0) == 0) {
-        pg_old = *i;
-        *i = pgtag_val;
-      }
-    }
-    if (pg_old.empty()) {
-      read.emplace_back(pgtag_val);
-    }
-  }
-}
+//// Process a qname group of records; each record a vector of string fields.
+//void process_qname_group(
+//    std::vector<SamRecord>& qname_group,
+//    std::ostream& out,
+//    bloomfilter::BloomFilter& bf,
+//    size_t reads_per_template,
+//    bool strip_previous) {
+//
+//  // calculate ends                               // 27 seconds
+//  std::vector<end_t> ends { template_ends(qname_group) };
+//
+//  if (ends.size() != reads_per_template) {        // < 1 sec
+//    std::string err = (reads_per_template == 1)
+//      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
+//      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
+//    spdlog::error(err, qname_group[0][0], ends.size());
+//    exit(1);
+//  }
+//
+//  std::string ends_str { ends_to_string(ends) };  // < 1 sec
+//  if (ends[0] == unmapped) {
+//    // sort order => if 1st is unmapped all are, so do nothing.
+//  } else if (!bf.add(ends_str)) {                 // <- 2-4 seconds (n=1000)
+//    // ends already seen => dupe
+//    for (auto & read : qname_group) {
+//      update_dup_status(read, true);              // <- 8-10 seconds
+//    }
+//  } else if (strip_previous) {
+//    for (auto & read : qname_group) {
+//      update_dup_status(read, false);
+//    }
+//  }
+//  // write to output
+//  for (auto record : qname_group) {
+//    out << join(record, SAM_delimiter, '\n');     // <- 26 seconds (join + <<)
+//  }
+//}
+//
+//// Calculate template ends from the primary alignments of the qname group.
+//// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
+//// vector of them is in coordinate-sorted order. Unmapped ends sort last by
+//// construction.
+//std::vector<end_t> template_ends(
+//    const std::vector<SamRecord>& qname_group) {
+//
+//  std::vector<end_t> ends;
+//
+//  for (auto read : qname_group) {
+//    auto flag      = stoi(read[1]);
+//    auto rname     = read[2];
+//    auto ref_start = stoi(read[3]);
+//    auto cigar     = read[5];
+//    // use only primary alignments for end calculation
+//    if ((flag & flag_secondary) || (flag & flag_supplementary)){
+//      continue;
+//    }
+//    // unmapped
+//    if (flag & flag_unmapped){
+//      ends.emplace_back(unmapped);
+//    // forward
+//    } else if (!(flag & flag_reverse)) {
+//      std::smatch sm;
+//      regex_search(cigar, sm, re_leading_s);
+//      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+//      ends.emplace_back(rname, ref_start - leading_s, 'F');
+//    // reverse
+//    } else {
+//      std::smatch sm;
+//      regex_search(cigar, sm, re_trailing_s);
+//      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
+//      int ref_end { ref_start };
+//      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
+//      std::sregex_iterator end;
+//      while (iter != end){
+//        if (consumes_reference.count((*iter)[2])) {
+//          ref_end += stoi((*iter)[1]);
+//        }
+//        ++iter;
+//      }
+//      ends.emplace_back(rname, ref_end + trailing_s, 'R');
+//    }
+//  }
+//  sort(ends.begin(), ends.end());                 // 2-3 seconds?
+//  return ends;
+//}
+//
+//// Update the duplicate flag and PG:Z tag value on a read.
+//// When 'set' is true the flag is set, otherwise it is unset.
+//void update_dup_status(std::vector<std::string>& read, bool set) {
+//  auto prev = read[1];
+//  auto flag = stoi(prev);
+//  // update the flag                              // < 1 second
+//  read[1] = set
+//    ? std::to_string(flag | flag_duplicate)
+//    : std::to_string(flag ^ flag_duplicate);
+//  // update PG:Z if flag changed                  // 8-9 seconds
+//  if (read[1] != prev) {
+//    auto start { read.begin() };
+//    std::advance(start, sam_opts_idx);
+//    std::string pg_old;
+//    for (auto i = start; i != read.end(); ++i) {
+//      if (i->rfind(pgtag, 0) == 0) {
+//        pg_old = *i;
+//        *i = pgtag_val;
+//      }
+//    }
+//    if (pg_old.empty()) {
+//      read.emplace_back(pgtag_val);
+//    }
+//  }
+//}
 
 }
 
