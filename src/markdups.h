@@ -85,21 +85,6 @@ inline std::string join(
   return joined;
 }
 
-inline std::vector<std::string> split(
-    const std::string& joined, const char sep) {
-  std::vector<std::string> elems;
-  auto stop { joined.end() };
-  for (auto i = joined.begin(); i != stop; ++i) {
-    auto j = i;
-    i = std::find(i, stop, sep);
-    elems.emplace_back(j, i);
-    if (i == stop) {
-      break;
-    }
-  }
-  return elems;
-}
-
 inline std::string ends_to_string(std::vector<end_t> ends) {
   std::string ends_str;
   for (auto end : ends) {
@@ -128,14 +113,14 @@ void pgline(
     const std::vector<std::string>& cli_args);
 
 void process_qname_group(
-    std::vector<SamRecord>& qname_group,
+    std::list<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
     size_t reads_per_template = 2,
     bool strip_previous = false);
 
 std::vector<end_t> template_ends(
-    const std::vector<SamRecord>& qname_group);
+    const std::list<SamRecord>& qname_group);
 
 }
 #endif // STREAMMD_MARKDUPS_H_
