@@ -61,9 +61,12 @@ class SamRecord {
   uint16_t flag_;
   std::string rname_;
   int32_t pos_;
+  size_t cigaridx_;
+  size_t cigarlen_;
   std::string cigar_;
   size_t pgidx_;
   size_t pglen_;
+  int32_t start_pos();
 };
 
 inline std::string join(
