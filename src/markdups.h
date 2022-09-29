@@ -25,6 +25,7 @@ const std::set<std::string> consumes_reference { "M", "D", "N", "=", "X" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
 const std::string default_metrics { pgid + "-metrics.json" };
+const end_t empty { "", -1, '\0' };
 const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
 const uint64_t default_n { 1000000000 };
@@ -44,6 +45,7 @@ class SamRecord {
   std::string buffer;
   void parse();
   void update_dup_status(bool set);
+  end_t read_end();
   inline const std::string& qname() { return qname_; };
   inline const uint16_t& flag() { return flag_; };
   inline const std::string& rname() { return rname_; };

@@ -27,11 +27,11 @@ SamRecord::SamRecord() {
 
 // Read what we need and no more.
 void SamRecord::parse() {
-  // Behond this we're seatbelts unfastened and assuming good SAM records...
   if (buffer.empty()) {
     spdlog::warn("Cannot parse empty buffer");
     return;
   }
+  // Beyond here we're seatbelts unfastened and assuming good SAM records...
   size_t start, stop;
 
   // qname
@@ -74,7 +74,6 @@ void SamRecord::parse() {
 // Update the duplicate flag and PG:Z tag value on a record.
 // When 'set' is true the flag is set, otherwise it is unset.
 void SamRecord::update_dup_status(bool set) {
-
   auto prev = flag_;
   flag_ = set
     ? (flag_ | flag_duplicate)
@@ -84,6 +83,40 @@ void SamRecord::update_dup_status(bool set) {
     // values are valid
     buffer.replace(pgidx_, pglen_, pgtagval_);
     buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
+  }
+}
+
+// Return read end as tuple of the form (rname, (start|end), [FR])
+end_t SamRecord::read_end() {
+  // use only primary alignments for end calculation
+  if ((flag_ & flag_secondary) || (flag_ & flag_supplementary)){
+    return empty;
+  }
+  // unmapped
+  if (flag_ & flag_unmapped){
+    return unmapped;
+  }
+  // forward
+  if (!(flag_ & flag_reverse)) {
+    std::smatch sm;
+    regex_search(cigar_, sm, re_leading_s);
+    int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+    return std::make_tuple(rname_, pos_ - leading_s, 'F');
+  // reverse
+  } else {
+    std::smatch sm;
+    regex_search(cigar_, sm, re_trailing_s);
+    int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
+    int ref_end { pos_ };
+    std::sregex_iterator iter(cigar_.begin(), cigar_.end(), re_cigar);
+    std::sregex_iterator end;
+    while (iter != end){
+      if (consumes_reference.count((*iter)[2])) {
+        ref_end += stoi((*iter)[1]);
+      }
+      ++iter;
+    }
+    return std::make_tuple(rname_, ref_end + trailing_s, 'R');
   }
 }
 
@@ -172,7 +205,7 @@ void process_qname_group(
   // calculate ends                               // 27 seconds [old]
   std::vector<end_t> ends { template_ends(qname_group) };
 
-  if (ends.size() != reads_per_template) {        // < 1 sec
+  if (ends.size() != reads_per_template) {
     std::string err = (reads_per_template == 1)
       ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
       : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
@@ -180,7 +213,7 @@ void process_qname_group(
     exit(1);
   }
 
-  std::string ends_str { ends_to_string(ends) };  // < 1 sec
+  std::string ends_str { ends_to_string(ends) };
   if (ends[0] == unmapped) {
     // sort order => if 1st is unmapped all are, so do nothing.
   } else if (!bf.add(ends_str)) {
@@ -194,7 +227,7 @@ void process_qname_group(
     }
   }
   // write to output
-  for (auto record : qname_group) {               // <- 13 seconds [new]
+  for (auto record : qname_group) {
     record.buffer.append(1, '\n');
     out << record.buffer;
   }
@@ -206,45 +239,20 @@ void process_qname_group(
 // construction.
 std::vector<end_t> template_ends(
     const std::vector<SamRecord>& qname_group) {
-
   std::vector<end_t> ends;
-
   for (auto read : qname_group) {
-    auto flag { read.flag() };
-    auto rname { read.rname() };
-    auto ref_start { read.pos() };
-    auto cigar { read.cigar() };
-    // use only primary alignments for end calculation
-    if ((flag & flag_secondary) || (flag & flag_supplementary)){
+    end_t end {read.read_end()};
+    if (end == empty) {
       continue;
     }
-    // unmapped
-    if (flag & flag_unmapped){
-      ends.emplace_back(unmapped);
-    // forward
-    } else if (!(flag & flag_reverse)) {
-      std::smatch sm;
-      regex_search(cigar, sm, re_leading_s);
-      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-      ends.emplace_back(rname, ref_start - leading_s, 'F');
-    // reverse
+    if (!ends.size() ||
+        (std::get<0>(end) >= std::get<0>(ends[0]) &&
+         std::get<1>(end) >= std::get<1>(ends[0]))) {
+      ends.push_back(end);
     } else {
-      std::smatch sm;
-      regex_search(cigar, sm, re_trailing_s);
-      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
-      int ref_end { ref_start };
-      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
-      std::sregex_iterator end;
-      while (iter != end){
-        if (consumes_reference.count((*iter)[2])) {
-          ref_end += stoi((*iter)[1]);
-        }
-        ++iter;
-      }
-      ends.emplace_back(rname, ref_end + trailing_s, 'R');
+      ends.insert(ends.begin(), end);
     }
   }
-  sort(ends.begin(), ends.end());                 // 2-3 seconds?
   return ends;
 }
 
