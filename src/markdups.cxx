@@ -117,7 +117,7 @@ void process_input_stream(
       samrecord.parse();
       if (samrecord.qname() != qname_prev) {
         n_qname += 1;
-        if (n_qname % log_interval == 0) {        // < 1 second
+        if (n_qname % log_interval == 0) {
           spdlog::debug("qnames read: {0}", n_qname);
         }
         if (qname_group.size()) {
@@ -126,7 +126,7 @@ void process_input_stream(
         }
         qname_prev = samrecord.qname();
       }
-      qname_group.emplace_back(samrecord);        // 5-6 seconds
+      qname_group.emplace_back(samrecord);
     }
   }
   // handle the last group
@@ -169,86 +169,84 @@ void process_qname_group(
     size_t reads_per_template,
     bool strip_previous) {
 
-//  // calculate ends                               // 27 seconds
-//  std::vector<end_t> ends { template_ends(qname_group) };
-//
-//  if (ends.size() != reads_per_template) {        // < 1 sec
-//    std::string err = (reads_per_template == 1)
-//      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
-//      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
-//    spdlog::error(err, qname_group[0][0], ends.size());
-//    exit(1);
-//  }
-//
-//  std::string ends_str { ends_to_string(ends) };  // < 1 sec
-//  if (ends[0] == unmapped) {
-//    // sort order => if 1st is unmapped all are, so do nothing.
-//  } else if (!bf.add(ends_str)) {                 // <- 2-4 seconds (n=1000)
-//    // ends already seen => dupe
-//    for (auto & read : qname_group) {
-//      update_dup_status(read, true);              // <- 8-10 seconds
-//    }
-//  } else if (strip_previous) {
-//    for (auto & read : qname_group) {
-//      update_dup_status(read, false);
-//    }
-//  }
+  // calculate ends                               // 27 seconds [old]
+  std::vector<end_t> ends { template_ends(qname_group) };
+
+  if (ends.size() != reads_per_template) {        // < 1 sec
+    std::string err = (reads_per_template == 1)
+      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
+      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
+    spdlog::error(err, qname_group[0].qname(), ends.size());
+    exit(1);
+  }
+
+  std::string ends_str { ends_to_string(ends) };  // < 1 sec
+  if (ends[0] == unmapped) {
+    // sort order => if 1st is unmapped all are, so do nothing.
+  } else if (!bf.add(ends_str)) {
+    // ends already seen => dupe
+    for (auto & read : qname_group) {
+      read.update_dup_status(true);
+    }
+  } else if (strip_previous) {
+    for (auto & read : qname_group) {
+      read.update_dup_status(false);
+    }
+  }
   // write to output
   for (auto record : qname_group) {               // <- 13 seconds [new]
-    record.update_dup_status(true);
     record.buffer.append(1, '\n');
     out << record.buffer;
   }
 }
-//
-//// Calculate template ends from the primary alignments of the qname group.
-//// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
-//// vector of them is in coordinate-sorted order. Unmapped ends sort last by
-//// construction.
-//std::vector<end_t> template_ends(
-//    const std::vector<SamRecord>& qname_group) {
-//
-//  std::vector<end_t> ends;
-//
-//  for (auto read : qname_group) {
-//    auto flag      = stoi(read[1]);
-//    auto rname     = read[2];
-//    auto ref_start = stoi(read[3]);
-//    auto cigar     = read[5];
-//    // use only primary alignments for end calculation
-//    if ((flag & flag_secondary) || (flag & flag_supplementary)){
-//      continue;
-//    }
-//    // unmapped
-//    if (flag & flag_unmapped){
-//      ends.emplace_back(unmapped);
-//    // forward
-//    } else if (!(flag & flag_reverse)) {
-//      std::smatch sm;
-//      regex_search(cigar, sm, re_leading_s);
-//      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-//      ends.emplace_back(rname, ref_start - leading_s, 'F');
-//    // reverse
-//    } else {
-//      std::smatch sm;
-//      regex_search(cigar, sm, re_trailing_s);
-//      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
-//      int ref_end { ref_start };
-//      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
-//      std::sregex_iterator end;
-//      while (iter != end){
-//        if (consumes_reference.count((*iter)[2])) {
-//          ref_end += stoi((*iter)[1]);
-//        }
-//        ++iter;
-//      }
-//      ends.emplace_back(rname, ref_end + trailing_s, 'R');
-//    }
-//  }
-//  sort(ends.begin(), ends.end());                 // 2-3 seconds?
-//  return ends;
-//}
-//
+
+// Calculate template ends from the primary alignments of the qname group.
+// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
+// vector of them is in coordinate-sorted order. Unmapped ends sort last by
+// construction.
+std::vector<end_t> template_ends(
+    const std::vector<SamRecord>& qname_group) {
+
+  std::vector<end_t> ends;
+
+  for (auto read : qname_group) {
+    auto flag { read.flag() };
+    auto rname { read.rname() };
+    auto ref_start { read.pos() };
+    auto cigar { read.cigar() };
+    // use only primary alignments for end calculation
+    if ((flag & flag_secondary) || (flag & flag_supplementary)){
+      continue;
+    }
+    // unmapped
+    if (flag & flag_unmapped){
+      ends.emplace_back(unmapped);
+    // forward
+    } else if (!(flag & flag_reverse)) {
+      std::smatch sm;
+      regex_search(cigar, sm, re_leading_s);
+      int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+      ends.emplace_back(rname, ref_start - leading_s, 'F');
+    // reverse
+    } else {
+      std::smatch sm;
+      regex_search(cigar, sm, re_trailing_s);
+      int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
+      int ref_end { ref_start };
+      std::sregex_iterator iter(cigar.begin(), cigar.end(), re_cigar);
+      std::sregex_iterator end;
+      while (iter != end){
+        if (consumes_reference.count((*iter)[2])) {
+          ref_end += stoi((*iter)[1]);
+        }
+        ++iter;
+      }
+      ends.emplace_back(rname, ref_end + trailing_s, 'R');
+    }
+  }
+  sort(ends.begin(), ends.end());                 // 2-3 seconds?
+  return ends;
+}
 
 }
 
