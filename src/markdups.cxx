@@ -178,7 +178,7 @@ void process_input_stream(
         }
         qname_prev = samrecord.qname();
       }
-      qname_group.emplace_back(samrecord);
+      qname_group.push_back(std::move(samrecord));
     }
   }
   // handle the last group
@@ -267,9 +267,9 @@ std::vector<end_t> template_ends(
     if (!ends.size() ||
         (std::get<0>(end) >= std::get<0>(ends[0]) &&
          std::get<1>(end) >= std::get<1>(ends[0]))) {
-      ends.push_back(end);
+      ends.push_back(std::move(end));
     } else {
-      ends.insert(ends.begin(), end);
+      ends.insert(ends.begin(), std::move(end));
     }
   }
   return ends;
