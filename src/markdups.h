@@ -23,8 +23,7 @@ const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::regex re_trailing_s { R"((\d+)S$)" };
 const std::set<std::string> consumes_reference { "M", "D", "N", "=", "X" };
 const std::string pgid { "streammd"  };
-const std::string pgtag { "PG:Z" };
-const std::string pgtag_val { pgtag + ":" + pgid };
+const std::string pgtag { "PG:Z:" };
 const std::string default_metrics { pgid + "-metrics.json" };
 const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
@@ -44,6 +43,7 @@ class SamRecord {
   SamRecord();
   std::string buffer;
   void parse();
+  void update_dup_status(bool set);
   inline const std::string& qname() { return qname_; };
   inline const uint16_t& flag() { return flag_; };
   inline const std::string& rname() { return rname_; };
@@ -51,8 +51,8 @@ class SamRecord {
   inline const std::string& cigar() { return cigar_; };
 
  private:
-  inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + "PG:Z:" };
-  inline static const size_t pgtaglen_ { pgtag_.length() };
+  inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + pgtag };
+  inline static const std::string pgtagval_ { pgtag_ + pgid };
   std::string qname_;
   size_t flagidx_;
   size_t flaglen_;
@@ -131,8 +131,6 @@ void process_qname_group(
 
 std::vector<end_t> template_ends(
     const std::vector<SamRecord>& qname_group);
-
-void update_dup_status(std::vector<std::string>& read, bool set = true);
 
 }
 #endif // STREAMMD_MARKDUPS_H_

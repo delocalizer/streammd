@@ -27,13 +27,12 @@ SamRecord::SamRecord() {
 
 // Read what we need and no more.
 void SamRecord::parse() {
+  // Behond this we're seatbelts unfastened and assuming good SAM records...
   if (buffer.empty()) {
     spdlog::warn("Cannot parse empty buffer");
     return;
   }
   size_t start, stop;
-
-  // Seatbelts off; we assume we've got good SAM records...
 
   // qname
   start=0; stop=buffer.find(SAM_delimiter, start);
@@ -64,16 +63,32 @@ void SamRecord::parse() {
     pgidx_ = buffer.length();
     pglen_ = 0;
   } else {
-    pgidx_ = stop + pgtaglen_;              // needed for update
-    stop=buffer.find(SAM_delimiter, pgidx_);
+    pgidx_ = stop;                          // needed for update
+    stop=buffer.find(SAM_delimiter, pgidx_ + 1);
     pglen_ = (stop == std::string::npos)    // needed for update
              ? buffer.length() - pgidx_
              : stop - pgidx_;
   }
 }
 
+// Update the duplicate flag and PG:Z tag value on a record.
+// When 'set' is true the flag is set, otherwise it is unset.
+void SamRecord::update_dup_status(bool set) {
+
+  auto prev = flag_;
+  flag_ = set
+    ? (flag_ | flag_duplicate)
+    : (flag_ ^ flag_duplicate);
+  if (flag_ != prev) {
+    // update the buffer from the end (PG first then FLAG) so the parsed idx
+    // values are valid
+    buffer.replace(pgidx_, pglen_, pgtagval_);
+    buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
+  }
+}
+
 // Process the input stream. Header lines are written directly to the output
-// stream; reads are dispatched in qname groups for further processing. 
+// stream; reads are dispatched in qname groups for further processing.
 void process_input_stream(
     std::istream& in,
     std::ostream& out,
@@ -81,74 +96,13 @@ void process_input_stream(
     std::vector<std::string> cli_args,
     size_t reads_per_template,
     bool strip_previous) {
-  
+
   bool header_done { false };
   uint64_t n_qname { 0 };
   std::string qname_prev { "" };
   std::string qname;
   std::string header_last { "" };
   std::vector<SamRecord> qname_group;
-
-  // Use C stdio.h getline to fill a char buffer and output with C fputs
-  /* this takes ~ 5 seconds reading only; ~ 22 seconds r+w;
-  char *buffer;
-  size_t bufsize = 4096;
-  int characters;
-  buffer = (char *)malloc(bufsize * sizeof(char));
-  while ((characters = getline(&buffer, &bufsize, stdin)) > 0) {
-    // note c getline grabs \n also so we don't add it here
-    // fputs(buffer, stdout);
-  }
-  */
-
-  // Use C++ istream::getline to fill a char buffer and output with C fputs
-  /* this also takes ~ 5 seconds reading only; ~ 22 seconds r+w.
-  int maxbufsz {4096};
-  for (char buf[maxbufsz]; in.getline(buf, maxbufsz);) {
-    fputs(buf, stdout);
-    fputs("\n", stdout);
-  }
-  if (in.eof()) {
-    spdlog::trace("EOF");
-  } else {
-    spdlog::error("Malformed input — line too long?");
-  }
-  */
-
-  // Use C++ istream::getline to fill a char buffer and output with C++ <<
-  /* This took ~ 5 seconds reading only but 72(!) seconds r+w.
-  int maxbufsz {4096};
-  for (char buf[maxbufsz]; in.getline(buf, maxbufsz);) {
-    out << buf << std::endl;
-  }
-  if (in.eof()) {
-    spdlog::trace("EOF");
-  } else {
-    spdlog::error("Malformed input — line too long?");
-  }
-  */
-
-  // Use C++ istream::getline to create std::string and output with C++ << 
-  /* This took ~ 5 seconds reading only but 72(!) seconds r+w.
-  for (std::string line; std::getline(in, line);) {
-    out << line << std::endl;
-  }
-  */
-
-  // And here we have it! This runs in ~ 20 seconds
-  // all important requirements:
-  // 1. un-syncing ios * 180s -> 70s
-  // 2. un-tie-ing stdin and stdout 70s -> 20s
-  // 3. appending "\n" to the string before calling <<
-  //    (calling: out << line << std::endl takes over 60 seconds...)
-  /*
-  std::ios::sync_with_stdio(false);
-  std::cin.tie(0);
-  for (std::string line; std::getline(in, line);) {
-    line += "\n";
-    out << line << std::endl;
-  }
-  */ 
 
   for (SamRecord samrecord; std::getline(in, samrecord.buffer);) {
     // header
@@ -161,50 +115,22 @@ void process_input_stream(
         header_done = true;
       }
       samrecord.parse();
-      std::string outline { samrecord.qname() };
-      outline += SAM_delimiter;
-      outline += samrecord.rname();
-      outline += SAM_delimiter;
-      outline += std::to_string(samrecord.pos());
-      outline += SAM_delimiter;
-      outline += samrecord.cigar();
-      outline += "\n";
-      std::cout << outline ;
-    }
-  }
-
-  /*
-                                                  // 3-4 seconds getline
-  for (std::string line; std::getline(in, line);) {
-    if (line.rfind("@", 0) == 0) {                // 0.5 seconds
-      line += "\n";
-      out << line;
-      header_last = line;
-    } else {
-      if (!header_done) {
-        pgline(out, header_last, cli_args);
-        header_done = true;
-      }
-                                                  // 15 seconds
-      std::vector<std::string> fields { split(line, SAM_delimiter) };
-      qname = fields[0];
-      if (qname != qname_prev) {
+      if (samrecord.qname() != qname_prev) {
         n_qname += 1;
         if (n_qname % log_interval == 0) {        // < 1 second
-          spdlog::debug("qnames read: {0}", n_qname); 
+          spdlog::debug("qnames read: {0}", n_qname);
         }
         if (qname_group.size()) {
           process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
           qname_group.clear();
         }
-        qname_prev = qname;
+        qname_prev = samrecord.qname();
       }
-      qname_group.emplace_back(fields);           // 5-6 seconds
+      qname_group.emplace_back(samrecord);        // 5-6 seconds
     }
   }
   // handle the last group
   process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
-  */
 }
 
 // Write @PG line to the output stream; to be called after all existing header
@@ -235,14 +161,14 @@ void pgline(
   out << join(tags, SAM_delimiter, '\n');
 }
 
-//// Process a qname group of records; each record a vector of string fields.
-//void process_qname_group(
-//    std::vector<SamRecord>& qname_group,
-//    std::ostream& out,
-//    bloomfilter::BloomFilter& bf,
-//    size_t reads_per_template,
-//    bool strip_previous) {
-//
+// Process a qname group of records; each record a vector of string fields.
+void process_qname_group(
+    std::vector<SamRecord>& qname_group,
+    std::ostream& out,
+    bloomfilter::BloomFilter& bf,
+    size_t reads_per_template,
+    bool strip_previous) {
+
 //  // calculate ends                               // 27 seconds
 //  std::vector<end_t> ends { template_ends(qname_group) };
 //
@@ -267,11 +193,13 @@ void pgline(
 //      update_dup_status(read, false);
 //    }
 //  }
-//  // write to output
-//  for (auto record : qname_group) {
-//    out << join(record, SAM_delimiter, '\n');     // <- 26 seconds (join + <<)
-//  }
-//}
+  // write to output
+  for (auto record : qname_group) {               // <- 13 seconds [new]
+    record.update_dup_status(true);
+    record.buffer.append(1, '\n');
+    out << record.buffer;
+  }
+}
 //
 //// Calculate template ends from the primary alignments of the qname group.
 //// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
@@ -321,31 +249,6 @@ void pgline(
 //  return ends;
 //}
 //
-//// Update the duplicate flag and PG:Z tag value on a read.
-//// When 'set' is true the flag is set, otherwise it is unset.
-//void update_dup_status(std::vector<std::string>& read, bool set) {
-//  auto prev = read[1];
-//  auto flag = stoi(prev);
-//  // update the flag                              // < 1 second
-//  read[1] = set
-//    ? std::to_string(flag | flag_duplicate)
-//    : std::to_string(flag ^ flag_duplicate);
-//  // update PG:Z if flag changed                  // 8-9 seconds
-//  if (read[1] != prev) {
-//    auto start { read.begin() };
-//    std::advance(start, sam_opts_idx);
-//    std::string pg_old;
-//    for (auto i = start; i != read.end(); ++i) {
-//      if (i->rfind(pgtag, 0) == 0) {
-//        pg_old = *i;
-//        *i = pgtag_val;
-//      }
-//    }
-//    if (pg_old.empty()) {
-//      read.emplace_back(pgtag_val);
-//    }
-//  }
-//}
 
 }
 
@@ -353,6 +256,8 @@ using namespace markdups;
 
 int main(int argc, char* argv[]) {
 
+  // Un-sync and un-tie the I/O; this makes a HUGE difference in speed when
+  // reading from stdin and writing to stdout with streams.
   std::ios::sync_with_stdio(false);
   std::cin.tie(0);
 
