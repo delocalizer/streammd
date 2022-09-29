@@ -31,7 +31,7 @@ void SamRecord::parse() {
     spdlog::warn("Cannot parse empty buffer");
     return;
   }
-  // Beyond here we're seatbelts unfastened and assuming good SAM records...
+  // Seatbelts unfastened and we're just assuming good SAM records...
   size_t start, stop;
 
   // qname
@@ -55,6 +55,8 @@ void SamRecord::parse() {
   // cigar
   start=stop+1; stop=buffer.find(SAM_delimiter, start);
   start=stop+1; stop=buffer.find(SAM_delimiter, start);
+  cigaridx_ = start;
+  cigarlen_ = stop - start;
   cigar_ = buffer.substr(start, stop - start);
 
   // pg
@@ -98,10 +100,11 @@ end_t SamRecord::read_end() {
   }
   // forward
   if (!(flag_ & flag_reverse)) {
-    std::smatch sm;
-    regex_search(cigar_, sm, re_leading_s);
-    int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-    return std::make_tuple(rname_, pos_ - leading_s, 'F');
+    //std::smatch sm;
+    //regex_search(cigar_, sm, re_leading_s);
+    //int leading_s = sm.empty() ? 0 : stoi(sm[1]);
+    //return std::make_tuple(rname_, pos_ - leading_s, 'F');
+    return std::make_tuple(rname_, start_pos(), 'F');
   // reverse
   } else {
     std::smatch sm;
@@ -118,6 +121,22 @@ end_t SamRecord::read_end() {
     }
     return std::make_tuple(rname_, ref_end + trailing_s, 'R');
   }
+}
+
+// Return reference start of a fwd read (pos - leading soft clips)
+int32_t SamRecord::start_pos(){
+  int num { 0 };
+  char ch { '\0' }, op { '\0' };
+  for (size_t i=cigaridx_; i < cigaridx_ + cigarlen_; ++i) {
+    ch = buffer[i] - '0';
+    if (0 <= ch && ch <= 9) {
+      num = 10 * num + ch;
+    } else  {
+      op = ch;
+      break;
+    }
+  }
+  return pos_ - ((op == 'S') ? num : 0);
 }
 
 // Process the input stream. Header lines are written directly to the output
