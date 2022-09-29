@@ -29,12 +29,40 @@ const std::string default_metrics { pgid + "-metrics.json" };
 const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
 const uint64_t default_n { 1000000000 };
-const unsigned short flag_unmapped      = 4;
-const unsigned short flag_reverse       = 16;
-const unsigned short flag_secondary     = 256;
-const unsigned short flag_duplicate     = 1024;
-const unsigned short flag_supplementary = 2048;
-const unsigned short sam_opts_idx = 11;
+const size_t short flag_unmapped      = 4;
+const size_t short flag_reverse       = 16;
+const size_t short flag_secondary     = 256;
+const size_t short flag_duplicate     = 1024;
+const size_t short flag_supplementary = 2048;
+const size_t short sam_opts_idx = 11;
+
+// This is a very specialized representation of a SAM record, for the
+// purposes of duplicate marking — not generally useful for much else
+class SamRecord {
+
+ public:
+  SamRecord();
+  std::string buffer;
+  void parse();
+  inline const std::string& qname() { return qname_; };
+  inline const uint16_t& flag() { return flag_; };
+  inline const std::string& rname() { return rname_; };
+  inline const int32_t& pos() { return pos_; };
+  inline const std::string& cigar() { return cigar_; };
+
+ private:
+  inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + "PG:Z:" };
+  inline static const size_t pgtaglen_ { pgtag_.length() };
+  std::string qname_;
+  size_t flagidx_;
+  size_t flaglen_;
+  uint16_t flag_;
+  std::string rname_;
+  int32_t pos_;
+  std::string cigar_;
+  size_t pgidx_;
+  size_t pglen_;
+};
 
 inline std::string join(
     const std::vector<std::string>& elems,
@@ -86,7 +114,7 @@ void process_input_stream(
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
     std::vector<std::string> cli_args,
-    unsigned reads_per_template = 2,
+    size_t reads_per_template = 2,
     bool strip_previous = false);
 
 void pgline(
@@ -95,14 +123,14 @@ void pgline(
     const std::vector<std::string>& cli_args);
 
 void process_qname_group(
-    std::vector<std::vector<std::string>>& qname_group,
+    std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
-    unsigned reads_per_template = 2,
+    size_t reads_per_template = 2,
     bool strip_previous = false);
 
 std::vector<end_t> template_ends(
-    const std::vector<std::vector<std::string>>& qname_group);
+    const std::vector<SamRecord>& qname_group);
 
 void update_dup_status(std::vector<std::string>& read, bool set = true);
 

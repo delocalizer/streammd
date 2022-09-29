@@ -19,10 +19,10 @@ class BloomFilter {
   bool contains(const std::string& item);
   bool add(const std::string& item);
 
-  inline uint64_t n() { return n_; }
-  inline float p() { return p_; }
-  inline uint64_t m() { return m_; }
-  inline int k() { return k_; }
+  const uint64_t& n() const { return n_; }
+  const float& p() const { return p_; }
+  const uint64_t& m() const { return m_; }
+  const int& k() const { return k_; }
 
   uint64_t count_estimate();
 
