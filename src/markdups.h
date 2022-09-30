@@ -29,8 +29,7 @@ const size_t short flag_supplementary = 2048;
 class SamRecord {
 
  public:
-  SamRecord() {
-    std::string buffer;
+  SamRecord(): buffer() {
     buffer.reserve(1024);
   }
   std::string buffer;
@@ -84,6 +83,8 @@ class SamRecord {
                ? buffer.length() - pgidx_
                : stop - pgidx_;
     }
+    // append for output while we're here...
+    buffer.append(1, '\n');
   }
 
   // Return reference start of a fwd read (pos - leading soft clips)

@@ -33,7 +33,8 @@ void process_input_stream(
   for (SamRecord samrecord; std::getline(in, samrecord.buffer);) {
     // header
     if (samrecord.buffer[0] == '@') {
-      out << samrecord.buffer + "\n";
+      out << samrecord.buffer;
+      out << "\n";
       header_last = samrecord.buffer;
     } else {
       if (!header_done) {
@@ -87,7 +88,7 @@ void pgline(
   out << join(tags, SAM_delimiter, '\n');
 }
 
-// Process a qname group of records; each record a vector of string fields.
+// Process a qname group of records.
 void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
@@ -125,7 +126,6 @@ void process_qname_group(
   }
   // write to output
   for (auto record : qname_group) {
-    record.buffer.append(1, '\n');
     out << record.buffer;
   }
 }
