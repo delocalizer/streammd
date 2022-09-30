@@ -26,8 +26,9 @@ void SamRecord::parse() {
     spdlog::warn("Cannot parse empty buffer");
     return;
   }
-  // Seatbelts unfastened and we're just assuming good SAM records...
   size_t start, stop;
+
+  // Seatbelts unfastened and we're just assuming good SAM records...
 
   // qname
   start=0; stop=buffer.find(SAM_delimiter, start);
@@ -35,8 +36,8 @@ void SamRecord::parse() {
 
   // flag
   start=stop+1; stop=buffer.find(SAM_delimiter, start);
-  flagidx_ = start;                         // needed for update
-  flaglen_ = stop - start;                  // needed for update
+  flagidx_ = start;
+  flaglen_ = stop - start;
   flag_ = stoi(buffer.substr(flagidx_, flaglen_));
 
   // rname
@@ -59,9 +60,9 @@ void SamRecord::parse() {
     pgidx_ = buffer.length();
     pglen_ = 0;
   } else {
-    pgidx_ = stop;                          // needed for update
+    pgidx_ = stop;
     stop=buffer.find(SAM_delimiter, pgidx_ + 1);
-    pglen_ = (stop == std::string::npos)    // needed for update
+    pglen_ = (stop == std::string::npos)
              ? buffer.length() - pgidx_
              : stop - pgidx_;
   }
@@ -224,7 +225,7 @@ void process_qname_group(
     size_t reads_per_template,
     bool strip_previous) {
 
-  // calculate ends                               // 27 seconds [old]
+  // calculate ends
   std::vector<end_t> ends { template_ends(qname_group) };
 
   if (ends.size() != reads_per_template) {
