@@ -11,8 +11,6 @@
 #include "markdups.h"
 #include "version.h"
 
-using end_t = std::tuple<std::string, uint32_t, char>;
-
 namespace markdups {
 
 SamRecord::SamRecord() {
@@ -68,40 +66,6 @@ void SamRecord::parse() {
   }
 }
 
-// Update the duplicate flag and PG:Z tag value on a record.
-// When 'set' is true the flag is set, otherwise it is unset.
-void SamRecord::update_dup_status(bool set) {
-  auto prev = flag_;
-  flag_ = set
-    ? (flag_ | flag_duplicate)
-    : (flag_ ^ flag_duplicate);
-  if (flag_ != prev) {
-    // update the buffer from the end (PG first then FLAG) so the parsed idx
-    // values are valid
-    buffer.replace(pgidx_, pglen_, pgtagval_);
-    buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
-  }
-}
-
-// Return read end as tuple of the form (rname, (start|end), [FR])
-end_t SamRecord::read_end() {
-  // use only primary alignments for end calculation
-  if ((flag_ & flag_secondary) || (flag_ & flag_supplementary)){
-    return empty;
-  }
-  // unmapped
-  if (flag_ & flag_unmapped){
-    return unmapped;
-  }
-  // forward
-  if (!(flag_ & flag_reverse)) {
-    return std::make_tuple(rname_, start_pos(), 'F');
-  // reverse
-  } else {
-    return std::make_tuple(rname_, end_pos(), 'R');
-  }
-}
-
 // Return reference start of a fwd read (pos - leading soft clips)
 int32_t SamRecord::start_pos(){
   int num { 0 };
@@ -141,6 +105,21 @@ int32_t SamRecord::end_pos(){
     }
   }
   return pos_ + reflen + ((op == 'S') ? prev : 0);
+}
+
+// Update the duplicate flag and PG:Z tag value on a record.
+// When 'set' is true the flag is set, otherwise it is unset.
+void SamRecord::update_dup_status(bool set) {
+  auto prev = flag_;
+  flag_ = set
+    ? (flag_ | flag_duplicate)
+    : (flag_ ^ flag_duplicate);
+  if (flag_ != prev) {
+    // update the buffer from the end (PG first then FLAG) so the parsed idx
+    // values are valid
+    buffer.replace(pgidx_, pglen_, pgtagval_);
+    buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
+  }
 }
 
 // Process the input stream. Header lines are written directly to the output
@@ -226,7 +205,7 @@ void process_qname_group(
     bool strip_previous) {
 
   // calculate ends
-  std::vector<end_t> ends { template_ends(qname_group) };
+  auto ends = template_ends(qname_group);
 
   if (ends.size() != reads_per_template) {
     std::string err = (reads_per_template == 1)
@@ -236,9 +215,13 @@ void process_qname_group(
     exit(1);
   }
 
-  std::string ends_str { ends_to_string(ends) };
-  if (ends[0] == unmapped) {
-    // sort order => if 1st is unmapped all are, so do nothing.
+  std::string ends_str {
+    (reads_per_template == 1) 
+      ? ends.front()
+      : ends.front() + '_' + ends.back() };
+
+  if (ends.front() == unmapped) {
+    // sort order => if 1st is unmapped all are => do nothing.
   } else if (!bf.add(ends_str)) {
     // ends already seen => dupe
     for (auto & read : qname_group) {
@@ -257,23 +240,28 @@ void process_qname_group(
 }
 
 // Calculate template ends from the primary alignments of the qname group.
-// Ends are returned as tuples of the form (rname, (start|end), [FR]) and the
-// vector of them is in coordinate-sorted order. Unmapped ends sort last by
-// construction.
-std::vector<end_t> template_ends(
+// Unmapped reads sort last by construction.
+std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group) {
-  std::vector<end_t> ends;
+
+  // End strings are constructed like: "{rname}{F|R}{pos}" with the F|R between
+  // because rname can end in a digit and we need string values that distinguish
+  // between ("chr1", 1234) and ("chr11", 234).
+  std::deque<std::string> ends;
+
   for (auto read : qname_group) {
-    end_t end {read.read_end()};
-    if (end == empty) {
+    // use only primary alignments for end calculation
+    if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
       continue;
-    }
-    if (!ends.size() ||
-        (std::get<0>(end) >= std::get<0>(ends[0]) &&
-         std::get<1>(end) >= std::get<1>(ends[0]))) {
-      ends.push_back(std::move(end));
+    // unmapped
+    } else if (read.flag() & flag_unmapped){
+      ends.emplace_back(unmapped);
+    // reverse
+    } else if (read.flag() & flag_reverse) {
+      ends.emplace_back(read.rname() + 'R' + std::to_string(read.end_pos()));
+    // forward
     } else {
-      ends.insert(ends.begin(), std::move(end));
+      ends.emplace_front(read.rname() + 'F' + std::to_string(read.start_pos()));
     }
   }
   return ends;
