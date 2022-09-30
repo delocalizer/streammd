@@ -1,10 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <cmath>
 #include <fstream>
 #include <iostream>
-#include <string>
 #include <vector>
 
 #include <argparse/argparse.hpp>
@@ -31,8 +26,9 @@ void SamRecord::parse() {
     spdlog::warn("Cannot parse empty buffer");
     return;
   }
-  // Seatbelts unfastened and we're just assuming good SAM records...
   size_t start, stop;
+
+  // Seatbelts unfastened and we're just assuming good SAM records...
 
   // qname
   start=0; stop=buffer.find(SAM_delimiter, start);
@@ -40,8 +36,8 @@ void SamRecord::parse() {
 
   // flag
   start=stop+1; stop=buffer.find(SAM_delimiter, start);
-  flagidx_ = start;                         // needed for update
-  flaglen_ = stop - start;                  // needed for update
+  flagidx_ = start;
+  flaglen_ = stop - start;
   flag_ = stoi(buffer.substr(flagidx_, flaglen_));
 
   // rname
@@ -57,7 +53,6 @@ void SamRecord::parse() {
   start=stop+1; stop=buffer.find(SAM_delimiter, start);
   cigaridx_ = start;
   cigarlen_ = stop - start;
-  cigar_ = buffer.substr(start, stop - start);
 
   // pg
   start=stop+1; stop=buffer.find(pgtag_, start);
@@ -65,9 +60,9 @@ void SamRecord::parse() {
     pgidx_ = buffer.length();
     pglen_ = 0;
   } else {
-    pgidx_ = stop;                          // needed for update
+    pgidx_ = stop;
     stop=buffer.find(SAM_delimiter, pgidx_ + 1);
-    pglen_ = (stop == std::string::npos)    // needed for update
+    pglen_ = (stop == std::string::npos)
              ? buffer.length() - pgidx_
              : stop - pgidx_;
   }
@@ -100,26 +95,10 @@ end_t SamRecord::read_end() {
   }
   // forward
   if (!(flag_ & flag_reverse)) {
-    //std::smatch sm;
-    //regex_search(cigar_, sm, re_leading_s);
-    //int leading_s = sm.empty() ? 0 : stoi(sm[1]);
-    //return std::make_tuple(rname_, pos_ - leading_s, 'F');
     return std::make_tuple(rname_, start_pos(), 'F');
   // reverse
   } else {
-    std::smatch sm;
-    regex_search(cigar_, sm, re_trailing_s);
-    int trailing_s = sm.empty() ? 0 : stoi(sm[1]);
-    int ref_end { pos_ };
-    std::sregex_iterator iter(cigar_.begin(), cigar_.end(), re_cigar);
-    std::sregex_iterator end;
-    while (iter != end){
-      if (consumes_reference.count((*iter)[2])) {
-        ref_end += stoi((*iter)[1]);
-      }
-      ++iter;
-    }
-    return std::make_tuple(rname_, ref_end + trailing_s, 'R');
+    return std::make_tuple(rname_, end_pos(), 'R');
   }
 }
 
@@ -137,6 +116,31 @@ int32_t SamRecord::start_pos(){
     }
   }
   return pos_ - ((op == 'S') ? num : 0);
+}
+
+// Return reference end of a rev read (pos + reflen + trailing soft clips)
+int32_t SamRecord::end_pos(){
+  int num { 0 }, prev { 0 }, reflen { 0 };
+  char ch { '\0' }, op { '\0' };
+  for (size_t i=cigaridx_; i < cigaridx_ + cigarlen_; ++i) {
+    ch = buffer[i] - '0';
+    if (0 <= ch && ch <= 9) {
+      num = 10 * num + ch;
+    } else  {
+      op = buffer[i];
+      // ops that consume reference
+      if (op == 'M' ||
+          op == 'D' ||
+          op == 'N' ||
+          op == '=' ||
+          op == 'X') {
+        reflen += num;
+      }
+      prev = num;
+      num = 0;
+    }
+  }
+  return pos_ + reflen + ((op == 'S') ? prev : 0);
 }
 
 // Process the input stream. Header lines are written directly to the output
@@ -221,7 +225,7 @@ void process_qname_group(
     size_t reads_per_template,
     bool strip_previous) {
 
-  // calculate ends                               // 27 seconds [old]
+  // calculate ends
   std::vector<end_t> ends { template_ends(qname_group) };
 
   if (ends.size() != reads_per_template) {

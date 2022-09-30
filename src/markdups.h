@@ -1,10 +1,7 @@
 #ifndef STREAMMD_MARKDUPS_H_
 #define STREAMMD_MARKDUPS_H_
 
-#include <cstdint>
 #include <regex>
-#include <set>
-#include <string>
 #include <tuple>
 
 #include "bloomfilter.h"
@@ -17,11 +14,7 @@ namespace markdups {
 const char DEL { 127 };
 const char SAM_delimiter { '\t' };
 const float default_p { 0.000001 };
-const std::regex re_cigar { R"((?:(\d+)([MIDNSHPX=])))" };
-const std::regex re_leading_s { R"(^(\d+)S)" };                       
 const std::regex re_pgid { R"(\tID:([^\t]+))" };
-const std::regex re_trailing_s { R"((\d+)S$)" };
-const std::set<std::string> consumes_reference { "M", "D", "N", "=", "X" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
 const std::string default_metrics { pgid + "-metrics.json" };
@@ -36,8 +29,8 @@ const size_t short flag_duplicate     = 1024;
 const size_t short flag_supplementary = 2048;
 const size_t short sam_opts_idx = 11;
 
-// This is a very specialized representation of a SAM record, for the
-// purposes of duplicate marking — not generally useful for much else
+// A highly specialized representation of a SAM record, for the purposes of
+// duplicate marking — probably not generally useful for other things...
 class SamRecord {
 
  public:
@@ -50,7 +43,6 @@ class SamRecord {
   inline const uint16_t& flag() { return flag_; };
   inline const std::string& rname() { return rname_; };
   inline const int32_t& pos() { return pos_; };
-  inline const std::string& cigar() { return cigar_; };
 
  private:
   inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + pgtag };
@@ -63,10 +55,10 @@ class SamRecord {
   int32_t pos_;
   size_t cigaridx_;
   size_t cigarlen_;
-  std::string cigar_;
   size_t pgidx_;
   size_t pglen_;
   int32_t start_pos();
+  int32_t end_pos();
 };
 
 inline std::string join(
