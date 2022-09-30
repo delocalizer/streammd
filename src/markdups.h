@@ -113,14 +113,14 @@ void pgline(
     const std::vector<std::string>& cli_args);
 
 void process_qname_group(
-    std::list<SamRecord>& qname_group,
+    std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
     size_t reads_per_template = 2,
     bool strip_previous = false);
 
 std::vector<end_t> template_ends(
-    const std::list<SamRecord>& qname_group);
+    const std::vector<SamRecord>& qname_group);
 
 }
 #endif // STREAMMD_MARKDUPS_H_

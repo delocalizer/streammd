@@ -132,7 +132,7 @@ int32_t SamRecord::start_pos(){
     if (0 <= ch && ch <= 9) {
       num = 10 * num + ch;
     } else  {
-      op = ch;
+      op = buffer[i];
       break;
     }
   }
