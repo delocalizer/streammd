@@ -18,8 +18,9 @@ const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
 const std::string default_metrics { pgid + "-metrics.json" };
-const end_t empty { "", -1, '\0' };
-const end_t unmapped { std::string(1, DEL), -1, DEL };
+const std::string unmapped { DEL };
+//const end_t empty { "", -1, '\0' };
+//const end_t unmapped { std::string(1, DEL), -1, DEL };
 const uint32_t log_interval { 1000000 };
 const uint64_t default_n { 1000000000 };
 const size_t short flag_unmapped      = 4;
@@ -37,12 +38,13 @@ class SamRecord {
   SamRecord();
   std::string buffer;
   void parse();
-  void update_dup_status(bool set);
-  end_t read_end();
   inline const std::string& qname() { return qname_; };
   inline const uint16_t& flag() { return flag_; };
   inline const std::string& rname() { return rname_; };
   inline const int32_t& pos() { return pos_; };
+  int32_t start_pos();
+  int32_t end_pos();
+  void update_dup_status(bool set);
 
  private:
   inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + pgtag };
@@ -57,8 +59,6 @@ class SamRecord {
   size_t cigarlen_;
   size_t pgidx_;
   size_t pglen_;
-  int32_t start_pos();
-  int32_t end_pos();
 };
 
 inline std::string join(
@@ -75,20 +75,6 @@ inline std::string join(
     joined += end;
   }
   return joined;
-}
-
-inline std::string ends_to_string(std::vector<end_t> ends) {
-  std::string ends_str;
-  for (auto end : ends) {
-    ends_str += std::get<0>(end);
-    // Place F|R next because rname can end in a digit and we need string
-    // values that distinguish between ("chr1", 1234) and ("chr11", 234) 
-    ends_str += std::get<2>(end);
-    ends_str += std::to_string(std::get<1>(end));
-    // Ditto, in case the next rname starts with a digit
-    ends_str += "_";
-  }
-  return ends_str;
 }
 
 void process_input_stream(
@@ -111,7 +97,7 @@ void process_qname_group(
     size_t reads_per_template = 2,
     bool strip_previous = false);
 
-std::vector<end_t> template_ends(
+std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group);
 
 }
