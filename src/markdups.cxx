@@ -234,6 +234,11 @@ int main(int argc, char* argv[]) {
   auto outfname = cli.present("--output");
   std::ifstream inf;
   std::ofstream outf;
+  //int sz {4096}; // fstat reports good for file output on my laptop
+  int sz {1024}; // fstat reports good for stdout on my laptop; also seems good for file redirect
+  std::vector<char> buf;
+  buf.resize(sz);
+  outf.rdbuf()->pubsetbuf(&buf[0], sz);
 
   process_input_stream(
       infname ? [&]() -> std::istream& {
@@ -250,4 +255,15 @@ int main(int argc, char* argv[]) {
       cli.get<bool>("--single") ? 1 : 2,
       cli.get<bool>("--strip-previous")
   );
+  FILE* fp = fopen("/home/conradL/scratch/scratch", "w+");
+  if(fp == NULL) {
+     perror("fopen"); return EXIT_FAILURE;
+  }  
+  struct stat stats;
+  int fileno(FILE*);
+  if(fstat(1, &stats) == -1) { // POSIX only
+      perror("fstat"); return EXIT_FAILURE;
+  }
+
+  printf("BUFSIZ is %d, but optimal block size is %ld\n", BUFSIZ, stats.st_blksize);
 }
