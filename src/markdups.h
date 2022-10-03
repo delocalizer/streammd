@@ -2,6 +2,7 @@
 #define STREAMMD_MARKDUPS_H_
 
 #include <regex>
+#include <spdlog/spdlog.h>
 
 #include "bloomfilter.h"
 

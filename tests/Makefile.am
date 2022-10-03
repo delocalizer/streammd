@@ -8,6 +8,6 @@ AM_CXXFLAGS = \
 TESTS = streammd_tests
 
 check_PROGRAMS = streammd_tests
-streammd_tests_SOURCES = test_bloomfilter.cxx
+streammd_tests_SOURCES = test_bloomfilter.cxx test_markdups.cxx
 streammd_tests_LDADD = ../src/libbloomfilter.a
 
