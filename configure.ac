@@ -9,7 +9,7 @@ LT_INIT
 AC_CONFIG_AUX_DIR([build-aux])
 
 # Initialize automake
-AM_INIT_AUTOMAKE
+AM_INIT_AUTOMAKE([subdir-objects])
 
 # Check for C++ compiler
 AC_PROG_CXX
@@ -19,7 +19,8 @@ AC_CONFIG_MACRO_DIR([m4])
 
 # What to make 
 AC_CONFIG_FILES([Makefile
-		 src/Makefile])
+		 src/Makefile
+		 tests/Makefile])
 
 # Generate the output
 AC_OUTPUT

@@ -10,6 +10,11 @@ configure
 configure~
 libtool
 src/streammd
-src/*.a
 src/*.o
+src/*.a
 src/.deps/
+tests/*.o
+tests/*.a
+tests/*.deps
+tests/*.trs
+tests/streammd_tests
