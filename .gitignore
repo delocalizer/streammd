@@ -1,5 +1,6 @@
 *.log
 *.tar.gz
+streammd-metrics.json
 Makefile
 Makefile.in
 aclocal.m4

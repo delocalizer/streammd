@@ -1,7 +1,13 @@
 #ifndef STREAMMD_MARKDUPS_H_
 #define STREAMMD_MARKDUPS_H_
 
+#include <cstdint>
+#include <deque>
 #include <regex>
+#include <string>
+#include <vector>
+
+#include <spdlog/spdlog.h>
 
 #include "bloomfilter.h"
 
@@ -11,22 +17,22 @@ namespace markdups {
 const char DEL { 127 };
 const char SAM_delimiter { '\t' };
 const float default_p { 0.000001 };
+const uint16_t flag_unmapped      { 4 };
+const uint16_t flag_reverse       { 16 };
+const uint16_t flag_secondary     { 256 };
+const uint16_t flag_duplicate     { 1024 };
+const uint16_t flag_supplementary { 2048 };
+const uint32_t log_interval { 1000000 };
+const uint64_t default_n { 1000000000 };
 const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
 const std::string default_metrics { pgid + "-metrics.json" };
 const std::string unmapped { DEL };
-const uint32_t log_interval { 1000000 };
-const uint64_t default_n { 1000000000 };
-const size_t short flag_unmapped      = 4;
-const size_t short flag_reverse       = 16;
-const size_t short flag_secondary     = 256;
-const size_t short flag_duplicate     = 1024;
-const size_t short flag_supplementary = 2048;
 
 struct metrics {
-  uint64_t templates, templates_marked_duplicate;
-  uint64_t alignments, alignments_marked_duplicate;
+  uint64_t templates, templates_marked_duplicate,
+           alignments, alignments_marked_duplicate;
 };
 
 // A highly specialized representation of a SAM record, for the purposes of
