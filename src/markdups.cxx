@@ -169,12 +169,16 @@ std::deque<std::string> template_ends(
 // Log and write metrics to file as JSON.
 void write_metrics(std::string metricsfname, metrics metrics) {
 
+  float dup_frac {float(metrics.templates_marked_duplicate)/metrics.templates}; 
+  spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
   spdlog::info("templates seen: {}", metrics.templates);
   spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
   spdlog::info("alignments seen: {}", metrics.alignments);
   spdlog::info("alignments marked duplicate: {}", metrics.alignments_marked_duplicate);
 
-  // std::format doesn't arrive till c++20 so format with good old fprintf
+  // std::format doesn't arrive till c++20 so format file output with ye olde
+  // fprintf. Note that spdlog includes fmt lib but using that would tie us to
+  // spdlog for logging.
   FILE* metricsf { fopen(metricsfname.c_str(), "w") };
   if (nullptr == metricsf) {
     spdlog::error("{} cannot be opened for writing.", metricsfname);
@@ -192,7 +196,7 @@ void write_metrics(std::string metricsfname, metrics metrics) {
         metrics.alignments_marked_duplicate,
         metrics.templates,
         metrics.templates_marked_duplicate,
-        float(metrics.templates_marked_duplicate)/metrics.templates);
+        dup_frac);
   }
 }
 
