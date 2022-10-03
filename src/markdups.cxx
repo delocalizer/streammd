@@ -1,6 +1,5 @@
 #include <fstream>
 #include <iostream>
-#include <vector>
 
 #include <argparse/argparse.hpp>
 #include <spdlog/spdlog.h>
@@ -277,11 +276,6 @@ int main(int argc, char* argv[]) {
   auto metricsfname = cli.get("--metrics");
   std::ifstream inf;
   std::ofstream outf;
-  //int sz {4096}; // fstat reports good for file output on my laptop
-  int sz {1024}; // fstat reports good for stdout on my laptop; also seems good for file redirect
-  std::vector<char> buf;
-  buf.resize(sz);
-  outf.rdbuf()->pubsetbuf(&buf[0], sz);
 
   auto result = process_input_stream(
       infname ? [&]() -> std::istream& {
