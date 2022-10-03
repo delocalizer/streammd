@@ -66,6 +66,7 @@ std::tuple<uint64_t, int> BloomFilter::m_k_min(uint64_t n, float p) {
 //
 // k linear combinations of just 2 independent hashes ("double hashing") has
 // the same asymptotic behaviour as k independent hashes.
+//
 // Ref: Kirsch & Mitzenmacher (2006) https://doi.org/10.1007/11841036_42
 void BloomFilter::hash(const std::string& item, uint64_t* buf) {
   uint64_t a { xxh::xxhash3<64>(item, seed1_) };

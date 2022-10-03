@@ -24,6 +24,11 @@ const size_t short flag_secondary     = 256;
 const size_t short flag_duplicate     = 1024;
 const size_t short flag_supplementary = 2048;
 
+struct metrics {
+  uint64_t templates, templates_marked_duplicate;
+  uint64_t alignments, alignments_marked_duplicate;
+};
+
 // A highly specialized representation of a SAM record, for the purposes of
 // duplicate marking — probably not generally useful for other things...
 class SamRecord {
@@ -174,7 +179,7 @@ inline std::string join(
   return joined;
 }
 
-void process_input_stream(
+metrics process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
@@ -191,11 +196,17 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    uint64_t& n_tpl_dup,
+    uint64_t& n_aln_dup,
     size_t reads_per_template = 2,
     bool strip_previous = false);
 
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group);
+
+void write_metrics(
+    std::string metricsfname,
+    metrics metrics);
 
 }
 #endif // STREAMMD_MARKDUPS_H_

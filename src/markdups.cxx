@@ -15,7 +15,7 @@ namespace markdups {
 
 // Process the input stream. Header lines are written directly to the output
 // stream; reads are dispatched in qname groups for further processing.
-void process_input_stream(
+metrics process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
@@ -24,10 +24,10 @@ void process_input_stream(
     bool strip_previous) {
 
   bool header_done { false };
-  uint64_t n_qname { 0 };
-  std::string qname_prev { "" };
+  uint64_t n_tpl { 0 }, n_aln {0}, n_tpl_dup {0}, n_aln_dup {0};
+  std::string header_prev { "" };
   std::string qname;
-  std::string header_last { "" };
+  std::string qname_prev { "" };
   std::vector<SamRecord> qname_group;
 
   for (SamRecord samrecord; std::getline(in, samrecord.buffer);) {
@@ -35,20 +35,22 @@ void process_input_stream(
     if (samrecord.buffer[0] == '@') {
       out << samrecord.buffer;
       out << "\n";
-      header_last = samrecord.buffer;
+      header_prev = samrecord.buffer;
     } else {
+      n_aln += 1;
       if (!header_done) {
-        pgline(out, header_last, cli_args);
+        pgline(out, header_prev, cli_args);
         header_done = true;
       }
       samrecord.parse();
       if (samrecord.qname() != qname_prev) {
-        n_qname += 1;
-        if (n_qname % log_interval == 0) {
-          spdlog::debug("qnames read: {0}", n_qname);
+        n_tpl += 1;
+        if (n_tpl % log_interval == 0) {
+          spdlog::debug("qnames seen: {0}", n_tpl);
         }
         if (qname_group.size()) {
-          process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
+          process_qname_group(qname_group, out, bf,
+              n_tpl_dup, n_aln_dup, reads_per_template, strip_previous);
           qname_group.clear();
         }
         qname_prev = samrecord.qname();
@@ -57,17 +59,19 @@ void process_input_stream(
     }
   }
   // handle the last group
-  process_qname_group(qname_group, out, bf, reads_per_template, strip_previous);
+  process_qname_group(qname_group, out, bf,
+      n_tpl_dup, n_aln_dup, reads_per_template, strip_previous);
+  return metrics { n_tpl, n_tpl_dup, n_aln, n_aln_dup };
 }
 
 // Write @PG line to the output stream; to be called after all existing header
 // lines have been processed.
-// 'header_last' is the currently last line of the header, which may contain a
+// 'header_prev' is the currently last line of the header, which may contain a
 // previous @PG entry.
 // 'cli_args' is a string vector of argv.
 void pgline(
     std::ostream& out,
-    const std::string& header_last,
+    const std::string& header_prev,
     const std::vector<std::string>& cli_args) {
   std::vector<std::string> tags {
     "@PG",
@@ -76,11 +80,11 @@ void pgline(
     "CL:" + join(cli_args, ' '),
     "VN:" + std::string(STREAMMD_VERSION)
   };
-  if (header_last.rfind("@PG\t", 0) == 0) {
+  if (header_prev.rfind("@PG\t", 0) == 0) {
     std::smatch sm;
-    regex_search(header_last, sm, re_pgid);
+    regex_search(header_prev, sm, re_pgid);
     if (sm.empty()) {
-      spdlog::warn("{}: invalid @PG line lacks ID: tag", header_last);
+      spdlog::warn("{}: invalid @PG line lacks ID: tag", header_prev);
     } else {
       tags.emplace_back("PP:" + std::string(sm[1]));
     }
@@ -93,6 +97,8 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    uint64_t& n_tpl_dup,
+    uint64_t& n_aln_dup,
     size_t reads_per_template,
     bool strip_previous) {
 
@@ -116,7 +122,9 @@ void process_qname_group(
     // sort order => if 1st is unmapped all are => do nothing.
   } else if (!bf.add(ends_str)) {
     // ends already seen => dupe
+    n_tpl_dup += 1;
     for (auto & read : qname_group) {
+      n_aln_dup += 1;
       read.update_dup_status(true);
     }
   } else if (strip_previous) {
@@ -156,6 +164,36 @@ std::deque<std::string> template_ends(
     }
   }
   return ends;
+}
+
+// Log and write metrics to file as JSON.
+void write_metrics(std::string metricsfname, metrics metrics) {
+
+  spdlog::info("templates seen: {}", metrics.templates);
+  spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
+  spdlog::info("alignments seen: {}", metrics.alignments);
+  spdlog::info("alignments marked duplicate: {}", metrics.alignments_marked_duplicate);
+
+  // std::format doesn't arrive till c++20 so format with good old fprintf
+  FILE* metricsf { fopen(metricsfname.c_str(), "w") };
+  if (nullptr == metricsf) {
+    spdlog::error("{} cannot be opened for writing.", metricsfname);
+    exit(1);
+  } else {
+    fprintf(metricsf,
+        "{"
+          "\"ALIGNMENTS\":%lu,"
+          "\"ALIGNMENTS_MARKED_DUPLICATE\":%lu,"
+          "\"TEMPLATES\":%lu,"
+          "\"TEMPLATES_MARKED_DUPLICATE\":%lu,"
+          "\"TEMPLATE_DUPLICATE_FRACTION\":%0.4f"
+        "}",
+        metrics.alignments,
+        metrics.alignments_marked_duplicate,
+        metrics.templates,
+        metrics.templates_marked_duplicate,
+        float(metrics.templates_marked_duplicate)/metrics.templates);
+  }
 }
 
 }
@@ -232,6 +270,7 @@ int main(int argc, char* argv[]) {
 
   auto infname = cli.present("--input");
   auto outfname = cli.present("--output");
+  auto metricsfname = cli.get("--metrics");
   std::ifstream inf;
   std::ofstream outf;
   //int sz {4096}; // fstat reports good for file output on my laptop
@@ -240,30 +279,27 @@ int main(int argc, char* argv[]) {
   buf.resize(sz);
   outf.rdbuf()->pubsetbuf(&buf[0], sz);
 
-  process_input_stream(
+  auto result = process_input_stream(
       infname ? [&]() -> std::istream& {
         inf.open(*infname);
         if (!inf) {
-          std::cerr << *infname << ": No such file" << std::endl;
+          spdlog::error("{}: cannot be opened for reading", *infname);
           exit(1);
         }
         return inf;
       }() : std::cin,
-      outfname ? [&]() -> std::ostream& { outf.open(*outfname); return outf; }() : std::cout,
+      outfname ? [&]() -> std::ostream& {
+        outf.open(*outfname);
+        if (!outf) {
+          spdlog::error("{}: cannot be opened for writing", *outfname);
+          exit(1);
+        }
+        return outf;
+      }() : std::cout,
       bf,
       args,
       cli.get<bool>("--single") ? 1 : 2,
       cli.get<bool>("--strip-previous")
   );
-  FILE* fp = fopen("/home/conradL/scratch/scratch", "w+");
-  if(fp == NULL) {
-     perror("fopen"); return EXIT_FAILURE;
-  }  
-  struct stat stats;
-  int fileno(FILE*);
-  if(fstat(1, &stats) == -1) { // POSIX only
-      perror("fstat"); return EXIT_FAILURE;
-  }
-
-  printf("BUFSIZ is %d, but optimal block size is %ld\n", BUFSIZ, stats.st_blksize);
+  write_metrics(metricsfname, result);
 }
