@@ -7,7 +7,6 @@
 #include <catch2/catch.hpp>
 
 #include "bloomfilter.h"
-#include "test_main.h"
 
 using namespace bloomfilter;
 
