@@ -1,0 +1,13 @@
+AM_CXXFLAGS = \
+	      -Wall \
+	      -Wextra \
+	      -std=c++17 \
+	      -I ../external \
+	      -I ../src 
+
+TESTS = streammd_tests
+
+check_PROGRAMS = streammd_tests
+streammd_tests_SOURCES = test_bloomfilter.cxx
+streammd_tests_LDADD = ../src/libbloomfilter.a
+
