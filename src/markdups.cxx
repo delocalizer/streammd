@@ -167,11 +167,11 @@ std::deque<std::string> template_ends(
 void write_metrics(std::string metricsfname, metrics metrics) {
 
   float dup_frac {float(metrics.templates_marked_duplicate)/metrics.templates}; 
-  spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
-  spdlog::info("templates seen: {}", metrics.templates);
-  spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
   spdlog::info("alignments seen: {}", metrics.alignments);
   spdlog::info("alignments marked duplicate: {}", metrics.alignments_marked_duplicate);
+  spdlog::info("templates seen: {}", metrics.templates);
+  spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
+  spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
 
   // std::format doesn't arrive till c++20 so format file output with ye olde
   // fprintf. Note that spdlog includes fmt lib but using that would tie us to
