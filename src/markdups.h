@@ -40,9 +40,7 @@ struct metrics {
 class SamRecord {
 
  public:
-  SamRecord(): buffer() {
-    buffer.reserve(1024);
-  }
+  SamRecord(): buffer() { buffer.reserve(1024); }
   SamRecord(std::string line): buffer(line) { this->parse(); }
   std::string buffer;
   inline const std::string& qname() { return qname_; };
@@ -142,6 +140,10 @@ class SamRecord {
 
   // Update the duplicate flag and PG:Z tag value on a record.
   // When 'set' is true the flag is set, otherwise it is unset.
+  //
+  // CAUTION after this is called the SamRecord idx and len values are no
+  // longer guaranteed valid so do it after all calculations and just before
+  // final output.
   inline void update_dup_status(bool set) {
     auto prev = flag_;
     flag_ = set
@@ -149,7 +151,7 @@ class SamRecord {
       : (flag_ ^ flag_duplicate);
     if (flag_ != prev) {
       // update the buffer from the end (PG first then FLAG) so the parsed idx
-      // values are valid
+      // values are valid this one time.
       buffer.replace(pgidx_, pglen_, pgtagval_);
       buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
     }

@@ -1,0 +1,1 @@
+./streammd_tests -s
