@@ -6,10 +6,11 @@ AM_CXXFLAGS = \
 
 bin_PROGRAMS = streammd
 
-streammd_SOURCES = markdups.cxx
-streammd_LDADD = libbloomfilter.a
+streammd_SOURCES = streammd.cxx markdups.cxx bloomfilter.cxx
+#streammd_LDADD = libbloomfilter.a libmarkdups.a
 
-noinst_LIBRARIES = libbloomfilter.a
-libbloomfilter_a_SOURCES = bloomfilter.cxx
+#noinst_LIBRARIES = libbloomfilter.a libmarkdups.a
+#libbloomfilter_a_SOURCES = bloomfilter.cxx
+#libmarkdups_a_SOURCES = markdups.cxx
 
 include_HEADERS = *.h
