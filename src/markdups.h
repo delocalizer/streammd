@@ -43,6 +43,7 @@ class SamRecord {
   SamRecord(): buffer() {
     buffer.reserve(1024);
   }
+  SamRecord(std::string line): buffer(line) { this->parse(); }
   std::string buffer;
   inline const std::string& qname() { return qname_; };
   inline const uint16_t& flag() { return flag_; };
