@@ -121,7 +121,7 @@ class TestMarkDups(TestCase):
 
     def test_readends_2(self):
         """
-        Confirm that calculated ends of aligned paired-end reads with same
+        Confirm that calculated ends of aligned single-end reads with same
         rname and pos but opposite orientation are different.
         """
         sam = AlignmentFile(RESOURCES.joinpath('2_reads_diff_orientation.sam'))

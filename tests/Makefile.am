@@ -5,7 +5,7 @@ AM_CXXFLAGS = \
 	      -I ../external \
 	      -I ../src 
 
-TESTS = streammd_tests
+TESTS = driver.sh 
 
 check_PROGRAMS = streammd_tests
 streammd_tests_SOURCES = test_bloomfilter.cxx test_markdups.cxx
