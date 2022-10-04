@@ -8,36 +8,36 @@
 using namespace bloomfilter;
 
 TEST_CASE("BloomFilter::m_k_min behaviour", "[BloomFilter static]") {
-  REQUIRE(BloomFilter::m_k_min(1000000, 0.000001) == std::make_tuple(28755177, 20));
-  REQUIRE(BloomFilter::m_k_min(10000000, 0.0000001) == std::make_tuple(335477051,	24));
-  REQUIRE(BloomFilter::m_k_min(100000000, 0.00000001) == std::make_tuple(3834023396, 27));
-  REQUIRE(BloomFilter::m_k_min(1000000000, 0.000001) == std::make_tuple(28755176136,	20));
+  CHECK(BloomFilter::m_k_min(1000000, 0.000001) == std::make_tuple(28755177, 20));
+  CHECK(BloomFilter::m_k_min(10000000, 0.0000001) == std::make_tuple(335477051,	24));
+  CHECK(BloomFilter::m_k_min(100000000, 0.00000001) == std::make_tuple(3834023396, 27));
+  CHECK(BloomFilter::m_k_min(1000000000, 0.000001) == std::make_tuple(28755176136,	20));
 }
 
 TEST_CASE("BloomFilter::add missing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
-  REQUIRE(bf.add(key) == true);
+  CHECK(bf.add(key) == true);
 }
 
 TEST_CASE("BloomFilter::add existing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   bf.add(key);
-  REQUIRE(bf.add(key) == false);
+  CHECK(bf.add(key) == false);
 }
 
 TEST_CASE("BloomFilter::contains missing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
-  REQUIRE(bf.contains(key) == false); 
+  CHECK(bf.contains(key) == false); 
 }
 
 TEST_CASE("BloomFilter::contains existing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   bf.add(key);
-  REQUIRE(bf.contains(key) == true);
+  CHECK(bf.contains(key) == true);
 }
 
 TEST_CASE("BloomFilter::count_estimate", "[BloomFilter correctness]") {
@@ -48,7 +48,7 @@ TEST_CASE("BloomFilter::count_estimate", "[BloomFilter correctness]") {
     bf.add(std::to_string(i));
     count++;
   }
-  REQUIRE_THAT(float(count)/bf.count_estimate(),
+  CHECK_THAT(float(count)/bf.count_estimate(),
                Catch::Matchers::WithinAbs(1.0, 0.001));
 }
 
@@ -65,7 +65,7 @@ TEST_CASE("BloomFilter FNR == 0", "[BloomFilter correctness]") {
   for (size_t i { 0 }; i < imax; ++i) {
     not_present += bf.contains(std::to_string(i)) ? 0 : 1;
   }
-  REQUIRE(not_present == 0);
+  CHECK(not_present == 0);
 }
 
 TEST_CASE("BloomFilter FPR bound", "[BloomFilter correctness]") {
@@ -83,6 +83,6 @@ TEST_CASE("BloomFilter FPR bound", "[BloomFilter correctness]") {
     for (size_t i { 0 }; i < n; ++i ) { fps += bf.contains(misses[i]) ? 1 : 0; }
     auto fpr { float(fps) / n };
     // 0 <= fpr <= 2p
-    REQUIRE_THAT(fpr, Catch::Matchers::WithinAbs(p, p));
+    CHECK_THAT(fpr, Catch::Matchers::WithinAbs(p, p));
   }
 }

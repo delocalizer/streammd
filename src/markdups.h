@@ -46,6 +46,7 @@ class SamRecord {
   inline const std::string& qname() { return qname_; };
   inline const uint16_t& flag() { return flag_; };
   inline const std::string& rname() { return rname_; };
+  inline const int32_t& pos() { return pos_; };
 
   // Construct what we need and no more.
   inline void parse() {
