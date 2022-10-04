@@ -7,40 +7,40 @@
 
 using namespace bloomfilter;
 
-TEST_CASE("BloomFilter::m_k_min behaviour", "[static]") {
+TEST_CASE("BloomFilter::m_k_min behaviour", "[BloomFilter static]") {
   REQUIRE(BloomFilter::m_k_min(1000000, 0.000001) == std::make_tuple(28755177, 20));
   REQUIRE(BloomFilter::m_k_min(10000000, 0.0000001) == std::make_tuple(335477051,	24));
   REQUIRE(BloomFilter::m_k_min(100000000, 0.00000001) == std::make_tuple(3834023396, 27));
   REQUIRE(BloomFilter::m_k_min(1000000000, 0.000001) == std::make_tuple(28755176136,	20));
 }
 
-TEST_CASE("BloomFilter::add missing", "[functionality]") {
+TEST_CASE("BloomFilter::add missing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   REQUIRE(bf.add(key) == true);
 }
 
-TEST_CASE("BloomFilter::add existing", "[functionality]") {
+TEST_CASE("BloomFilter::add existing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   bf.add(key);
   REQUIRE(bf.add(key) == false);
 }
 
-TEST_CASE("BloomFilter::contains missing", "[functionality]") {
+TEST_CASE("BloomFilter::contains missing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   REQUIRE(bf.contains(key) == false); 
 }
 
-TEST_CASE("BloomFilter::contains existing", "[functionality]") {
+TEST_CASE("BloomFilter::contains existing", "[BloomFilter functionality]") {
   BloomFilter bf(1000, 0.001);
   auto key = "something";
   bf.add(key);
   REQUIRE(bf.contains(key) == true);
 }
 
-TEST_CASE("BloomFilter::count_estimate", "[performance]") {
+TEST_CASE("BloomFilter::count_estimate", "[BloomFilter correctness]") {
   size_t n { 1000000 }, count { 0 };
   float p { 0.000001 };
   BloomFilter bf(n, p);
@@ -52,7 +52,7 @@ TEST_CASE("BloomFilter::count_estimate", "[performance]") {
                Catch::Matchers::WithinAbs(1.0, 0.001));
 }
 
-TEST_CASE("BloomFilter FNR == 0", "[performance]") {
+TEST_CASE("BloomFilter FNR == 0", "[BloomFilter correctness]") {
   size_t n { 1000000 }, not_present { 0 };
   size_t imax = n;
   float p { 0.000001 };
@@ -68,7 +68,7 @@ TEST_CASE("BloomFilter FNR == 0", "[performance]") {
   REQUIRE(not_present == 0);
 }
 
-TEST_CASE("BloomFilter FPR bound", "[performance]") {
+TEST_CASE("BloomFilter FPR bound", "[BloomFilter correctness]") {
   size_t n { 1000000 };
   std::vector<float> ps = { 0.001, 0.0001, 0.00001, 0.000001 };
   std::vector<std::string> values(n), misses(n);
