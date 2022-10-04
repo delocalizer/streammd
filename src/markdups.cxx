@@ -103,10 +103,11 @@ void process_qname_group(
 
   if (ends.size() != reads_per_template) {
     std::string err = (reads_per_template == 1)
-      ? "{0}: expected 1 primary alignment, got {1}. Input is not single reads?"
-      : "{0}: expected 2 primary alignments, got {1}. Input is not paired or not qname-grouped?";
-    spdlog::error(err, qname_group[0].qname(), ends.size());
-    exit(1);
+      ? "Input is not single reads?"
+      : "Input is not paired or not qname-grouped?";
+    throw std::runtime_error(
+        qname_group[0].qname() + ": got "
+        + std::to_string(ends.size()) + " primary alignments. " + err);
   }
 
   std::string ends_str {
@@ -177,8 +178,7 @@ void write_metrics(std::string metricsfname, metrics metrics) {
   // spdlog for logging.
   FILE* metricsf { fopen(metricsfname.c_str(), "w") };
   if (nullptr == metricsf) {
-    spdlog::error("{} cannot be opened for writing.", metricsfname);
-    exit(1);
+    throw std::runtime_error(metricsfname + " cannot be opened for writing");
   } else {
     fprintf(metricsf,
         "{"

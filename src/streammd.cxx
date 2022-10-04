@@ -70,8 +70,7 @@ int main(int argc, char* argv[]) {
   try {
     cli.parse_args(argc, argv);
   } catch(const std::runtime_error& err) {
-    std::cerr << err.what() << std::endl;
-    std::cerr << cli;
+    spdlog::error(err.what());
     std::exit(1);
   }
 
@@ -86,27 +85,32 @@ int main(int argc, char* argv[]) {
   std::ifstream inf;
   std::ofstream outf;
 
-  auto result = process_input_stream(
-      infname ? [&]() -> std::istream& {
-        inf.open(*infname);
-        if (!inf) {
-          spdlog::error("{}: cannot be opened for reading", *infname);
-          exit(1);
-        }
-        return inf;
-      }() : std::cin,
-      outfname ? [&]() -> std::ostream& {
-        outf.open(*outfname);
-        if (!outf) {
-          spdlog::error("{}: cannot be opened for writing", *outfname);
-          exit(1);
-        }
-        return outf;
-      }() : std::cout,
-      bf,
-      args,
-      cli.get<bool>("--single") ? 1 : 2,
-      cli.get<bool>("--strip-previous")
-  );
-  write_metrics(metricsfname, result);
+  try {
+    auto result = process_input_stream(
+        infname ? [&]() -> std::istream& {
+          inf.open(*infname);
+          if (!inf) {
+            std::string errmsg { *infname + " cannot be opened for reading" };
+            throw std::runtime_error(errmsg);
+          }
+          return inf;
+        }() : std::cin,
+        outfname ? [&]() -> std::ostream& {
+          outf.open(*outfname);
+          if (!outf) {
+            std::string errmsg { *outfname + " cannot be opened for writing" };
+            throw std::runtime_error(errmsg);
+          }
+          return outf;
+        }() : std::cout,
+        bf,
+        args,
+        cli.get<bool>("--single") ? 1 : 2,
+        cli.get<bool>("--strip-previous")
+    );
+    write_metrics(metricsfname, result);
+  } catch(const std::runtime_error& err) {
+    spdlog::error(err.what());
+    std::exit(1);
+  }
 }
