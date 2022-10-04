@@ -50,6 +50,12 @@ int main(int argc, char* argv[]) {
     .metavar("FP_RATE")
     .scan<'g', float>();
 
+  cli.add_argument("--allow-overcapacity")
+    .help("Warn instead of error when Bloom filter capacity is exceeded. "
+          "[default: false]")
+    .default_value(false)
+    .implicit_value(true);
+
   cli.add_argument("--metrics")
     .help("Output metrics file.")
     .default_value(default_metrics)
@@ -108,7 +114,19 @@ int main(int argc, char* argv[]) {
         cli.get<bool>("--single") ? 1 : 2,
         cli.get<bool>("--strip-previous")
     );
-    write_metrics(metricsfname, result);
+    auto cap { float(result.templates)/bf.n() };
+    if (cap <= 1.0) {
+      spdlog::info("BloomFilter: {:.3g}% capacity", 100*cap);
+      write_metrics(metricsfname, result);
+    } else if (cli.get<bool>("--allow-overcapacity")) {
+      write_metrics(metricsfname, result);
+      spdlog::warn("BloomFilter: {:.3g}% capacity", 100*cap);
+      spdlog::warn("BloomFilter capacity of {} exceeded: "
+        "false positive rate target of {} is likely violated.", bf.n(), bf.p());
+    } else {
+      spdlog::error("BloomFilter: {:.3g}% capacity", 100*cap);
+      throw std::runtime_error("BloomFilter capacity exceeded");
+    }
   } catch(const std::runtime_error& err) {
     spdlog::error(err.what());
     std::exit(1);
