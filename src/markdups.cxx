@@ -107,7 +107,7 @@ void process_qname_group(
       : "Input is not paired or not qname-grouped?";
     throw std::runtime_error(
         qname_group[0].qname() + ": got "
-        + std::to_string(ends.size()) + " primary alignments. " + err);
+        + std::to_string(ends.size()) + " primary alignment(s). " + err);
   }
 
   std::string ends_str {

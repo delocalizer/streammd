@@ -1,3 +1,4 @@
+#include <iostream>
 #include "markdups.h"
 #include "version.h"
 
@@ -130,6 +131,7 @@ TEST_CASE("markdups::template_ends pair with both ends unmapped", "[template_end
   auto ends1 { ends_str(template_ends(qn1), 2) };
   REQUIRE(ends1 == unmapped + "_" + unmapped);
 }
+
 TEST_CASE("markdups::template_ends single FF", "[template_ends]"){
   // Confirm that calculated ends of aligned single-end reads with same RNAME,
   // POS and orientation, are the same.
@@ -194,4 +196,133 @@ TEST_CASE("markdups::template_ends pairs with soft-clipping", "[template_ends]")
        ends2 { ends_str(template_ends(qn2), 2) };
   REQUIRE(ends1 == "chr1F725711_chr1R726006");
   REQUIRE(ends1 == ends2);
+}
+
+TEST_CASE("markdups::process_qname_group not single", "[process_qname_group]"){
+  // Confirm that exception is thrown if reads_per_template is 1 but qname
+  // group does not have exactly 1 primary alignment
+  SamRecord pair1_r1("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
+  SamRecord pair1_r2("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t147\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\tBDDDDDDEDDFHHHHHHJIJIJJJJJIJJJIJJJJJJJJJIIJJIJJJIIIJJIJJJJJIJJJJIJJJJJJJJJJJJJJJIJJJJJJJHHHHHFFFFFCCB\tNM:i:0\tAS:i:101\tXS:i:21");
+  std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
+  std::stringstream os;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  uint64_t n_tpl_dup {0}, n_aln_dup {0};
+  size_t reads_per_template = 1;
+  REQUIRE_THROWS_WITH(
+      process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, reads_per_template),
+      Catch::Matchers::Contains("Input is not single reads?"));
+}
+
+TEST_CASE("markdups::process_qname_group not paired", "[process_qname_group]"){
+  // Confirm that exception is thrown if reads_per_template is 2 but qname
+  // group does not have exactly 2 primary alignments
+  SamRecord sr1("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
+  std::vector<SamRecord> qn1 { sr1 };
+  std::stringstream os;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  uint64_t n_tpl_dup {0}, n_aln_dup {0};
+  size_t reads_per_template = 2;
+  REQUIRE_THROWS_WITH(
+      process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, reads_per_template),
+      Catch::Matchers::Contains("Input is not paired or not qname-grouped?"));
+}
+
+TEST_CASE("markdups::process_qname_group strip_previous==false", "[process_qname_group]"){
+  // Confirm that when strip_previous is false (default) that previously marked
+  // duplicate flag remains on read no longer considered duplicate
+  SamRecord sr1("NB551151:333:fake1:4:21501:17121:9587\t1024\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\tAAAAAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAEE\tNH:i:1\tHI:i:1\tAS:i:71\tnM:i:0\tNM:i:0\tMD:Z:73\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\tPG:Z:MarkDuplicates");
+  SamRecord sr2("NB551151:333:fake1:4:21506:21331:18924\t0\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\t/EAEEEAEAEEEEEEEEEEEEEEEEAEEEEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e");
+  std::vector<SamRecord> qn1 { sr1 };
+  std::vector<SamRecord> qn2 { sr2 };
+  REQUIRE(sr1.flag() == 1024);
+  REQUIRE_THAT(sr1.buffer, Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  REQUIRE(sr2.flag() == 0); 
+  REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
+  std::stringstream os;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  uint64_t n_tpl_dup {0}, n_aln_dup {0};
+  process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, false);
+  process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, false);
+  std::string out { os.str() };
+  // original dupe flag and PG remain on first read even though it was processed first
+  REQUIRE_THAT(out, Catch::Matchers::Contains("17121:9587\t1024"));
+  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  REQUIRE_THAT(out, Catch::Matchers::Contains("21331:18924\t1024"));
+  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:streammd"));
+}
+
+TEST_CASE("markdups::process_qname_group strip_previous==true", "[process_qname_group]"){
+  // Confirm that when strip_previous is true that previously marked duplicate
+  // flag is removed from read no longer considered duplicate.
+  SamRecord sr1("NB551151:333:fake1:4:21501:17121:9587\t1024\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\tAAAAAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAEE\tNH:i:1\tHI:i:1\tAS:i:71\tnM:i:0\tNM:i:0\tMD:Z:73\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\tPG:Z:MarkDuplicates");
+  SamRecord sr2("NB551151:333:fake1:4:21506:21331:18924\t0\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\t/EAEEEAEAEEEEEEEEEEEEEEEEAEEEEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e");
+  std::vector<SamRecord> qn1 { sr1 };
+  std::vector<SamRecord> qn2 { sr2 };
+  REQUIRE(sr1.flag() == 1024);
+  REQUIRE_THAT(sr1.buffer, Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  REQUIRE(sr2.flag() == 0); 
+  REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
+  std::stringstream os;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  uint64_t n_tpl_dup {0}, n_aln_dup {0};
+  process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, true);
+  process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, true);
+  std::string out { os.str() };
+  // original dupe flag and PG stripped from first read
+  REQUIRE_THAT(out, Catch::Matchers::Contains("17121:9587\t0"));
+  REQUIRE_THAT(out, !Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  REQUIRE_THAT(out, Catch::Matchers::Contains("21331:18924\t1024"));
+  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:streammd"));
+}
+
+TEST_CASE("markdups::process_input_stream single reads", "[process_input_stream]"){
+  // Confirm that duplicates are marked as expected on single-end reads.
+  std::stringstream in {
+    "NB551151:333:fake1:4:21501:17121:9587\t0\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\tAAAAAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAEE\tNH:i:1\tHI:i:1\tAS:i:71\tnM:i:0\tNM:i:0\tMD:Z:73\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\n"
+    "NB551151:333:fake1:4:21506:21331:18924\t0\tchr1\t4498454\t255\t73M\t*\t0\t0\tGTCTTCCGTTCACTACACCTTTCAATCCTGGATCACAGGGCTTTCCAGCCTTGACTACATACTTACGAATAAT\t/EAEEEAEAEEEEEEEEEEEEEEEEAEEEEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEAA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\n"
+  "NB551151:333:fake1:3:13509:15168:5615\t16\tchr1\t4502637\t255\t75M1S\t*\t0\t0\tGGATGTCCTCACCCTAGTCAGACCAATGTTGGCCCACACATTCTTTGCAGGAACCCCACAGAAATTGTAGTACCCC\tEEEEEEEEEAEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEEEEEEEEAEEEEEEEEEAAAAA\tNH:i:1\tHI:i:1\tAS:i:73\tnM:i:0\tNM:i:0\tMD:Z:75\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ba5a08e7-a5f7-48ce-b8f8-c0f223463c29\n"
+  "NB551151:333:fake1:4:12509:22440:18769\t16\tchr1\t4505378\t255\t76M\t*\t0\t0\tAAATCAACCCTTTCCTCTTCAACTTGTCTTGGTCATGGTGTTTCATCACAGCAATAGTAACCCTAACTAAAACAGG\tEEE<E/AEEAAEE/EEEEEA6/EEEEEEEE6AAEEEAEEEEE/EEEAEEEEEEEEEEEE//EAEEAEEEA/AA/AA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\n" };
+  std::stringstream out;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  std::vector<std::string> cli_args { "dummy", "args" };
+  auto result = process_input_stream(in, out, bf, cli_args, 1);
+  REQUIRE(result.templates == 4);
+  REQUIRE(result.templates_marked_duplicate == 1); // the second read
+  REQUIRE(result.alignments == 4);
+  REQUIRE(result.alignments_marked_duplicate == 1);
+}
+
+TEST_CASE("markdups::process_input_stream paired reads", "[process_input_stream]"){
+  // Confirm that duplicates are marked as expected on paired-end reads.
+  std::stringstream in {
+    "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tMD:Z:101\tAS:i:101\tXS:i:25\n"
+    "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t147\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\tBDDDDDDEDDFHHHHHHJIJIJJJJJIJJJIJJJJJJJJJIIJJIJJJIIIJJIJJJJJIJJJJIJJJJJJJJJJJJJJJIJJJJJJJHHHHHFFFFFCCB\tNM:i:0\tMD:Z:101\tAS:i:101\tXS:i:21\n"
+    "HWI-ST1213:151:C1DTBACXX:2:2106:1715:59565\t83\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\t?DDDDDDEDDFGHGFHHGIJJJIJJIIJJIIJIJJJIJJIIIJJJIIJIJJJJIJIJJIJJJIIJJJJJJJJJJJJJIJJJJJJJJJJHHHGHFFFFFCCC\tNM:i:0\tMD:Z:101\tAS:i:101\tXS:i:21\n"
+    "HWI-ST1213:151:C1DTBACXX:2:2106:1715:59565\t163\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHFHIJJJFHIJJJJJJJJJJJJJJJJJJJJIJJJIIJIJJHHIIJJHIGIIGIJIJJIJJJIIJHIHHFFFFFFFEEEDEDEDDDDDDDC\tNM:i:0\tMD:Z:101\tAS:i:101\tXS:i:25\n"
+  };
+  std::stringstream out;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  std::vector<std::string> cli_args { "dummy", "args" };
+  auto result = process_input_stream(in, out, bf, cli_args, 2);
+  REQUIRE(result.templates == 2);
+  REQUIRE(result.templates_marked_duplicate == 1); // the second pair 
+  REQUIRE(result.alignments == 4);
+  REQUIRE(result.alignments_marked_duplicate == 2);
+}
+
+TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
+  // Confirm that paired records with both read and mate unmapped still appear
+  // in the output
+  std::stringstream in {
+    "HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678\t77\t*\t0\t0\t*\t*\t0\t0\tGGCCGACAACCAGATTATGGGGCCCTCGAGCTATGCTTCTTTTGTGGTACGGGGGGAGAACCTGGTCACTGCCGTGAGCTACGGGCGCGTGATGCGTACGT\tCCCFFFFFHHHHHJJJIJIJJJIJJJJJJJJJIJJJJJJJJIJJGHJB@DGEHFDDDDDBDDDDDDDCDDDDDDB@DDCDDDDBDB@B>9B?CDCD88>BC\tAS:i:0\tXS:i:0\n"
+    "HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678\t141\t*\t0\t0\t*\t*\t0\t0\tCTTCTGTTGAGGGGGTATGGGGACTGAGTGTCATTGTACATCTTTTGCAGGCTTTCCACGGCCACCGCGTGGTTGCCCAGCTTGATGACGGCGGCTG\tCCCFFFFFGHHHHJJ?FHIIJJHIJJIJHIIIJJJJGIJIJJJJJJIJIJGHIJIJHHHHFFDDDDDDDBDDADDDDDDDDDDDDDDEDDBDD><.9\tAS:i:0\tXS:i:0\n"
+  };
+  std::stringstream out;
+  bloomfilter::BloomFilter bf(1000, 0.001);
+  std::vector<std::string> cli_args { "dummy", "args" };
+  auto result = process_input_stream(in, out, bf, cli_args, 2);
+  REQUIRE(result.templates == 1);
+  REQUIRE(result.templates_marked_duplicate == 0); 
+  REQUIRE(result.alignments == 2);
+  REQUIRE(result.alignments_marked_duplicate == 0);
 }
