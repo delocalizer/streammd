@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include "markdups.h"
 #include "version.h"
 
@@ -17,69 +18,69 @@ std::string ends_str(
 
 TEST_CASE("markdups::SamRecord.parse", "[SamRecord]") {
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
-  REQUIRE(sr.qname() == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680");
-  REQUIRE(sr.flag() == 99);
-  REQUIRE(sr.rname() == "chr1");
+  CHECK(sr.qname() == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680");
+  CHECK(sr.flag() == 99);
+  CHECK(sr.rname() == "chr1");
 }
 
 TEST_CASE("markdups::SamRecord.start_pos no soft clip", "[SamRecord]") {
   // this is a fwd read with POS=93578030 and CIGAR=101M
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
                          // POS
-  REQUIRE(sr.start_pos() == 93578030);
+  CHECK(sr.start_pos() == 93578030);
 }
 
 TEST_CASE("markdups::SamRecord.start_pos with soft clip", "[SamRecord]") {
   // this is a fwd read with POS=725721 and CIGAR=10S32M10I34M15S
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1107:3646:4446\t99\tchr1\t725721\t30\t10S32M10I34M15S\t=\t725895\t275\tGAACACGAAAGGAATACAAGGGAATTTAATGGAATGGACTCTAATGGAATGAAATGGAATGGACTTGAATGGAATATAATGGAAGATATTAGAATGGAATA\tCCCFFFFFHHHHHJJJJJJJJJJJJJJJJJJJIJJJJIIJJJIJIJJIIJIJJJJJJEHHIJIJJJJIGHHHHHFFDEFFFEEEECDDDFEEDDDDDCDD>\tNM:i:12\tAS:i:40\tXS:i:43");
                          // POS      10S
-  REQUIRE(sr.start_pos() == 725721 - 10);
+  CHECK(sr.start_pos() == 725721 - 10);
 }
 
 TEST_CASE("markdups::SamRecord.end_pos with insertion and no soft clip", "[SamRecord]") {
   // this is a rev read with POS=91356686 and CIGAR=28M2I71M
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1114:14456:12207\t83\tchr1\t91356686\t60\t28M2I71M\t=\t91356467\t-318\tCTCGTATCATTTTGAACTTTGCTTTTCATTTTTTTTTTTTTAATTTATTGATTGATTGATTTATTGATCATTCTTGGGTGTTTCTCGCAGAGGGGGATTTG\t#@<A@ACCCCCDA:CCC?C?2CCCA>>DBDDD@BDFEEIIJJIJJJJJIJIIJJJIJJJJJJJJJIHGJJJJIJJJJIJJJJIIHIIIHHHHHFFFFFCCB\tNM:i:2\tAS:i:91\tXS:i:53");
                        // POS        28M  2I  71M 
-  REQUIRE(sr.end_pos() == 91356686 + 28 + 0 + 71 );
+  CHECK(sr.end_pos() == 91356686 + 28 + 0 + 71 );
 }
 
 TEST_CASE("markdups::SamRecord.end_pos with soft clip", "[SamRecord]") {
   // this is a rev read with POS=725895 and CIGAR=40M10D51M10S
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1107:3646:4446\t147\tchr1\t725895\t30\t40M10D51M10S\t=\t725721\t-275\tTGGAATGGACTCGAATGGAATGGTATGGAATGGACTCGAATGCAATGGAATGTACTCAAATGGAATGCTATGGAATTGACTCGAGTGGAATGGAATAGAAT\t;FFFFEEHFHHIIJJIJIJJIIIJIJJJJJIJJIJJIJJJJJJJJJIGIGGIGDJJGJJJIJJJJJJJJJJJJJJJJJHJJJJJJJJJHHHHHFFFFFCCC\tNM:i:17\tAS:i:40\tXS:i:35");
                        // POS      40M  10D  51M  10S
-  REQUIRE(sr.end_pos() == 725895 + 40 + 10 + 51 + 10);
+  CHECK(sr.end_pos() == 725895 + 40 + 10 + 51 + 10);
 }
 
 TEST_CASE("markdups::SamRecord.update_dup_status set with no previous PG", "[SamRecord]"){
   // FLAG=99
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
   sr.update_dup_status(true);
-  REQUIRE(sr.flag() == 1123);
-  REQUIRE(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
+  CHECK(sr.flag() == 1123);
+  CHECK(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
 }
 
 TEST_CASE("markdups::SamRecord.update_dup_status set with previous PG last tag", "[SamRecord]"){
   // FLAG=99
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:foo");
   sr.update_dup_status(true);
-  REQUIRE(sr.flag() == 1123);
-  REQUIRE(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
+  CHECK(sr.flag() == 1123);
+  CHECK(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
 }
 
 TEST_CASE("markdups::SamRecord.update_dup_status set with previous PG not last tag", "[SamRecord]"){
   // FLAG=99
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tPG:Z:foo\tXS:i:25");
   sr.update_dup_status(true);
-  REQUIRE(sr.flag() == 1123);
-  REQUIRE(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tPG:Z:streammd\tXS:i:25\n");
+  CHECK(sr.flag() == 1123);
+  CHECK(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tPG:Z:streammd\tXS:i:25\n");
 }
 
 TEST_CASE("markdups::SamRecord.update_dup_status unset with no previous PG", "[SamRecord]"){
   // FLAG=1123
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t1123\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
   sr.update_dup_status(false);
-  REQUIRE(sr.flag() == 99);
-  REQUIRE(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
+  CHECK(sr.flag() == 99);
+  CHECK(sr.buffer == "HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25\tPG:Z:streammd\n");
 }
 
 TEST_CASE("markdups::pgline with previous @PG", "[pgline]") {
@@ -90,7 +91,7 @@ TEST_CASE("markdups::pgline with previous @PG", "[pgline]") {
   std::string expected {
     "@PG\tID:" + pgid + "\tPN:" + pgid + "\tCL:" + pgid + "\tVN:" +
       std::string(STREAMMD_VERSION) + "\tPP:" + "foo\n" }; 
-  REQUIRE(os.str() == expected);
+  CHECK(os.str() == expected);
 }
 
 TEST_CASE("markdups::pgline with no previous @PG", "[pgline]") {
@@ -101,7 +102,7 @@ TEST_CASE("markdups::pgline with no previous @PG", "[pgline]") {
   std::string expected {
     "@PG\tID:" + pgid + "\tPN:" + pgid + "\tCL:" + pgid + "\tVN:" +
       std::string(STREAMMD_VERSION) + "\n" }; 
-  REQUIRE(os.str() == expected);
+  CHECK(os.str() == expected);
 }
 
 TEST_CASE("markdups::template_ends pair", "[template_ends]"){
@@ -110,7 +111,7 @@ TEST_CASE("markdups::template_ends pair", "[template_ends]"){
   SamRecord pair1_r2("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t147\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\tBDDDDDDEDDFHHHHHHJIJIJJJJJIJJJIJJJJJJJJJIIJJIJJJIIIJJIJJJJJIJJJJIJJJJJJJJJJJJJJJIJJJJJJJHHHHHFFFFFCCB\tNM:i:0\tAS:i:101\tXS:i:21");
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) };
-  REQUIRE(ends1 == "chr1F93578030_chr1R93578329");
+  CHECK(ends1 == "chr1F93578030_chr1R93578329");
 }
 
 TEST_CASE("markdups::template_ends pair with one end unmapped", "[template_ends]"){
@@ -120,7 +121,7 @@ TEST_CASE("markdups::template_ends pair with one end unmapped", "[template_ends]
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) };
   // First read is unmapped but 'unmapped' sorts to last
-  REQUIRE(ends1 == "chr1F66212_" + unmapped);
+  CHECK(ends1 == "chr1F66212_" + unmapped);
 }
 
 TEST_CASE("markdups::template_ends pair with both ends unmapped", "[template_ends]"){
@@ -129,7 +130,7 @@ TEST_CASE("markdups::template_ends pair with both ends unmapped", "[template_end
   SamRecord pair1_r2("HWI-ST1213:151:C1DTBACXX:2:1112:10072:37225\t141\t*\t0\t0\t*\t*\t0\t0\tCTGAGCCCAAGTGGGCTTATATGGTGTTATTTCCACTTGAGGTGTCTGATGGGGAGTGGGTCCCACTGGATGATTAAATGGGATTGGCTGCATCCGCAAGG\tCCCFFFFFHHHDFIJJJJIJJJJJCHHHJJJJJJJJJJJEHIBFFHIJIJHHJJGICHIIEHHIGHHHHFFFFFFEEEEEEDCCDDDDDDBCDCCDDBBBB\tPG:Z:MarkDuplicates\tAS:i:0\tXS:i:0");
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) };
-  REQUIRE(ends1 == unmapped + "_" + unmapped);
+  CHECK(ends1 == unmapped + "_" + unmapped);
 }
 
 TEST_CASE("markdups::template_ends single FF", "[template_ends]"){
@@ -140,8 +141,8 @@ TEST_CASE("markdups::template_ends single FF", "[template_ends]"){
   std::vector<SamRecord> qn1 { sr1 }, qn2 { sr2 };
   auto ends1 { ends_str(template_ends(qn1), 1) },
        ends2 { ends_str(template_ends(qn2), 1) };
-  REQUIRE(ends1 == "chr1F4498454");
-  REQUIRE(ends1 == ends2);
+  CHECK(ends1 == "chr1F4498454");
+  CHECK(ends1 == ends2);
 }
 
 TEST_CASE("markdups::template_ends single FR", "[template_ends]"){
@@ -152,8 +153,8 @@ TEST_CASE("markdups::template_ends single FR", "[template_ends]"){
   std::vector<SamRecord> qn1 { sr1 }, qn2 { sr2 };
   auto ends1 { ends_str(template_ends(qn1), 1) },
        ends2 { ends_str(template_ends(qn2), 1) };
-  REQUIRE(ends1 == "chr1F4498454");
-  REQUIRE(ends1 != ends2);
+  CHECK(ends1 == "chr1F4498454");
+  CHECK(ends1 != ends2);
 }
 
 TEST_CASE("markdups::template_ends paired FR FR", "[template_ends]"){
@@ -166,8 +167,8 @@ TEST_CASE("markdups::template_ends paired FR FR", "[template_ends]"){
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  REQUIRE(ends1 == "chr1F13583_chr1R13860");
-  REQUIRE(ends1 == ends2);
+  CHECK(ends1 == "chr1F13583_chr1R13860");
+  CHECK(ends1 == ends2);
 }
 
 TEST_CASE("markdups::template_ends paired FR RF", "[template_ends]"){
@@ -180,8 +181,8 @@ TEST_CASE("markdups::template_ends paired FR RF", "[template_ends]"){
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  REQUIRE(ends1 == "chr1F564691_chr1R564988");
-  REQUIRE(ends1 == ends2);
+  CHECK(ends1 == "chr1F564691_chr1R564988");
+  CHECK(ends1 == ends2);
 }
 
 TEST_CASE("markdups::template_ends pairs with soft-clipping", "[template_ends]"){
@@ -194,8 +195,8 @@ TEST_CASE("markdups::template_ends pairs with soft-clipping", "[template_ends]")
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  REQUIRE(ends1 == "chr1F725711_chr1R726006");
-  REQUIRE(ends1 == ends2);
+  CHECK(ends1 == "chr1F725711_chr1R726006");
+  CHECK(ends1 == ends2);
 }
 
 TEST_CASE("markdups::process_qname_group not single", "[process_qname_group]"){
@@ -208,7 +209,7 @@ TEST_CASE("markdups::process_qname_group not single", "[process_qname_group]"){
   bloomfilter::BloomFilter bf(1000, 0.001);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   size_t reads_per_template = 1;
-  REQUIRE_THROWS_WITH(
+  CHECK_THROWS_WITH(
       process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, reads_per_template),
       Catch::Matchers::Contains("Input is not single reads?"));
 }
@@ -222,7 +223,7 @@ TEST_CASE("markdups::process_qname_group not paired", "[process_qname_group]"){
   bloomfilter::BloomFilter bf(1000, 0.001);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   size_t reads_per_template = 2;
-  REQUIRE_THROWS_WITH(
+  CHECK_THROWS_WITH(
       process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, reads_per_template),
       Catch::Matchers::Contains("Input is not paired or not qname-grouped?"));
 }
@@ -243,12 +244,13 @@ TEST_CASE("markdups::process_qname_group strip_previous==false", "[process_qname
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, false);
   process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, false);
-  std::string out { os.str() };
+  qn1[0].parse();
+  qn2[0].parse();
   // original dupe flag and PG remain on first read even though it was processed first
-  REQUIRE_THAT(out, Catch::Matchers::Contains("17121:9587\t1024"));
-  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
-  REQUIRE_THAT(out, Catch::Matchers::Contains("21331:18924\t1024"));
-  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:streammd"));
+  CHECK(qn1[0].flag() == 1024);
+  CHECK_THAT(qn1[0].buffer, Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  CHECK(qn2[0].flag() == 1024);
+  CHECK_THAT(qn2[0].buffer, Catch::Matchers::Contains("PG:Z:streammd"));
 }
 
 TEST_CASE("markdups::process_qname_group strip_previous==true", "[process_qname_group]"){
@@ -267,12 +269,13 @@ TEST_CASE("markdups::process_qname_group strip_previous==true", "[process_qname_
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, true);
   process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, true);
-  std::string out { os.str() };
+  qn1[0].parse();
+  qn2[0].parse();
   // original dupe flag and PG stripped from first read
-  REQUIRE_THAT(out, Catch::Matchers::Contains("17121:9587\t0"));
-  REQUIRE_THAT(out, !Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
-  REQUIRE_THAT(out, Catch::Matchers::Contains("21331:18924\t1024"));
-  REQUIRE_THAT(out, Catch::Matchers::Contains("PG:Z:streammd"));
+  CHECK(qn1[0].flag() == 0);
+  CHECK_THAT(qn1[0].buffer, !Catch::Matchers::Contains("PG:Z:MarkDuplicates"));
+  CHECK(qn2[0].flag() == 1024);
+  CHECK_THAT(qn2[0].buffer, Catch::Matchers::Contains("PG:Z:streammd"));
 }
 
 TEST_CASE("markdups::process_input_stream single reads", "[process_input_stream]"){
@@ -286,10 +289,10 @@ TEST_CASE("markdups::process_input_stream single reads", "[process_input_stream]
   bloomfilter::BloomFilter bf(1000, 0.001);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 1);
-  REQUIRE(result.templates == 4);
-  REQUIRE(result.templates_marked_duplicate == 1); // the second read
-  REQUIRE(result.alignments == 4);
-  REQUIRE(result.alignments_marked_duplicate == 1);
+  CHECK(result.templates == 4);
+  CHECK(result.templates_marked_duplicate == 1); // the second read
+  CHECK(result.alignments == 4);
+  CHECK(result.alignments_marked_duplicate == 1);
 }
 
 TEST_CASE("markdups::process_input_stream paired reads", "[process_input_stream]"){
@@ -304,10 +307,10 @@ TEST_CASE("markdups::process_input_stream paired reads", "[process_input_stream]
   bloomfilter::BloomFilter bf(1000, 0.001);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 2);
-  REQUIRE(result.templates == 2);
-  REQUIRE(result.templates_marked_duplicate == 1); // the second pair 
-  REQUIRE(result.alignments == 4);
-  REQUIRE(result.alignments_marked_duplicate == 2);
+  CHECK(result.templates == 2);
+  CHECK(result.templates_marked_duplicate == 1); // the second pair 
+  CHECK(result.alignments == 4);
+  CHECK(result.alignments_marked_duplicate == 2);
 }
 
 TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
@@ -321,8 +324,18 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
   bloomfilter::BloomFilter bf(1000, 0.001);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 2);
-  REQUIRE(result.templates == 1);
-  REQUIRE(result.templates_marked_duplicate == 0); 
-  REQUIRE(result.alignments == 2);
-  REQUIRE(result.alignments_marked_duplicate == 0);
+  CHECK(result.templates == 1);
+  CHECK(result.templates_marked_duplicate == 0); 
+  CHECK(result.alignments == 2);
+  CHECK(result.alignments_marked_duplicate == 0);
+}
+
+TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
+  std::ifstream teststrm, expectedstrm;
+  teststrm.open("resources/test.paired_full.sam");
+  expectedstrm.open("resources/test.paired_full.picardmd.sam");
+  std::ostringstream os;
+  os << expectedstrm.rdbuf();
+  auto expected { os.str() };
+  bloomfilter::BloomFilter bf(1000, 0.001);
 }
