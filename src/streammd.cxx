@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
     .help("Target maximum false positive rate when n items are stored.")
     .default_value(default_p)
     .metavar("FP_RATE")
-    .scan<'g', float>();
+    .scan<'g', double>();
 
   cli.add_argument("--allow-overcapacity")
     .help("Warn instead of error when Bloom filter capacity is exceeded. "
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
   }
 
   auto n { cli.get<uint64_t>("-n") };
-  auto p { cli.get<float>("-p") };
+  auto p { cli.get<double>("-p") };
   auto bf { bloomfilter::BloomFilter(n, p) };
   std::vector<std::string> args(argv, argv + argc);
 
