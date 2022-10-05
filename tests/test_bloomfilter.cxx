@@ -7,11 +7,23 @@
 
 using namespace bloomfilter;
 
-TEST_CASE("BloomFilter::m_k_min behaviour", "[BloomFilter static]") {
-  CHECK(BloomFilter::m_k_min(1000000, 0.000001) == std::make_tuple(28755177, 20));
-  CHECK(BloomFilter::m_k_min(10000000, 0.0000001) == std::make_tuple(335477051,	24));
-  CHECK(BloomFilter::m_k_min(100000000, 0.00000001) == std::make_tuple(3834023396, 27));
-  CHECK(BloomFilter::m_k_min(1000000000, 0.000001) == std::make_tuple(28755176136,	20));
+TEST_CASE("BloomFilter::capacity calculation", "[BloomFilter static]") {
+  std::cout << "BloomFilter::capacity(8000000, 10, 0.001): " << BloomFilter::capacity(8000000, 10, 0.001) << std::endl;
+}
+
+TEST_CASE("BloomFilter::m_k_min calculation", "[BloomFilter static]") {
+  auto [m, k] = BloomFilter::m_k_min(1000000, 0.000001) ;
+  CHECK(m == 28755176);
+  CHECK(k == 20);
+  std::tie(m, k) = BloomFilter::m_k_min(10000000, 0.0000001);
+  CHECK(m == 335477044);
+  CHECK(k == 24);
+  std::tie(m, k) = BloomFilter::m_k_min(100000000, 0.00000001);
+  CHECK(m == 3834023351);
+  CHECK(k == 27);
+  std::tie(m, k) = BloomFilter::m_k_min(1000000000, 0.000001);
+  CHECK(m == 28755175133);
+  CHECK(k == 20);
 }
 
 TEST_CASE("BloomFilter::add missing", "[BloomFilter functionality]") {

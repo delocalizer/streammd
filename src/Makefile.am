@@ -6,6 +6,6 @@ AM_CXXFLAGS = \
 
 bin_PROGRAMS = streammd
 
-streammd_SOURCES = streammd.cxx markdups.cxx bloomfilter.cxx
+streammd_SOURCES = bloomfilter.cxx markdups.cxx streammd.cxx
 
 include_HEADERS = *.h

@@ -14,19 +14,21 @@ class BloomFilter {
 
  public:
 
-  BloomFilter(uint64_t n, float p);
+  BloomFilter(uint64_t n, double p);
+  //BloomFilter(std::string memspec, double p);
 
   bool contains(const std::string& item);
   bool add(const std::string& item);
 
-  const uint64_t& n() const { return n_; }
-  const float& p() const { return p_; }
+  const double& p() const { return p_; }
+  const size_t& k() const { return k_; }
   const uint64_t& m() const { return m_; }
-  const int& k() const { return k_; }
+  const uint64_t& n() const { return n_; }
 
   uint64_t count_estimate();
 
-  static std::tuple<uint64_t, int> m_k_min(uint64_t n, float p);
+  static uint64_t capacity(uint64_t m, size_t k, double p);
+  static std::tuple<uint64_t, size_t> m_k_min(uint64_t n, double p);
 
  private:
 
@@ -34,11 +36,11 @@ class BloomFilter {
   static const uint64_t seed1_ { 43 };
   static const uint64_t seed2_ { 9967 };
 
-  const uint64_t n_;
-  const float p_;
+  const double p_;
 
+  size_t k_;
   uint64_t m_;
-  int k_;
+  uint64_t n_;
 
   void hash(const std::string& item, uint64_t* buf);
   std::unique_ptr<sul::dynamic_bitset<>> bitset;
