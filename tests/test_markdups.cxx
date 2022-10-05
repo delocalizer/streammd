@@ -330,6 +330,25 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
   CHECK(result.alignments_marked_duplicate == 0);
 }
 
+/*
+   Confirm that process_input_stream operates as expected on a larger input
+   file: 4058 alignments from 2027 templates, with a variety of different
+   flags, orientations, and complex CIGAR strings.
+ 
+   The test reference output was generated from the test input by Picard
+   MarkDuplicates (2.23.8).
+ 
+   The input SAM records in 'test.paired_full.sam' have been ordered with
+   higher quality reads in a duplicate set occuring first so that in this
+   case we expect the output of streammd to EXACTLY match that from
+   Picard MarkDuplicates (assuming no false positives from streammd,
+   which happens to be the case for this data with default --fp-rate and
+   seeds).
+ 
+   In the general case we expect only that the duplicate counts should
+   match, since Picard MarkDuplicates picks the highest quality read in a
+   set as the original, where streammd must pick the first.
+ */
 TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
   std::ifstream testinstrm, expectinstrm;
   testinstrm.open("resources/test.paired_full.sam");

@@ -40,7 +40,9 @@ Due to the nature of the single-pass operation:
 
 ## Install
 
-Download a distribution tarball `streammd-[x.y.z].tar.gz`.
+Download a distribution tarball `streammd-[x.y.z].tar.gz` from
+https://github.com/delocalizer/streammd/releases
+
 
 ```bash
 tar -xzvf streammd-[x.y.z].tar.gz
