@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include <argparse/argparse.hpp>
+#include <bytesize/bytesize.hh>
 #include <spdlog/spdlog.h>
 #include <spdlog/cfg/env.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -64,6 +65,12 @@ int main(int argc, char* argv[]) {
     .default_value(std::string(pgid + "-metrics.json"))
     .metavar("METRICS_FILE");
 
+  cli.add_argument("--show-capacity")
+    .help("Do no work, just print the capacity of the Bloom filter that would "
+          "be constructed with the given --fp-rate and --mem values.")
+    .default_value(false)
+    .implicit_value(true);
+
   cli.add_argument("--single")
     .help("Accept single-ended reads as input. [default: paired-end]")
     .default_value(false)
@@ -79,9 +86,21 @@ int main(int argc, char* argv[]) {
   try {
     cli.parse_args(argc, argv);
     std::vector<std::string> args(argv, argv + argc);
-
     auto p { cli.get<double>("-p") };
     auto mem { cli.get("-m") };
+
+    if (cli.get<bool>("--show-capacity")){
+      auto mem_actual { bloomfilter::BloomFilter::memspec_to_bytes(mem) };
+      auto mem_actual_str { bytesize::bytesize(mem_actual).format() };
+      std::cout << "specified fp-rate:       " << p << std::endl;
+      std::cout << "specified mem:           " << mem << std::endl;
+      std::cout << "allocated mem:           " << mem_actual_str << std::endl;
+      std::cout << "Bloom filter capacity n: "
+                << bloomfilter::BloomFilter::capacity(p, 8*mem_actual, 10)
+                << std::endl;
+      return 0;
+    }
+
     auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
     spdlog::info("BloomFilter capacity: {} items", bf.n());
 
