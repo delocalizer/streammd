@@ -78,25 +78,19 @@ int main(int argc, char* argv[]) {
 
   try {
     cli.parse_args(argc, argv);
-  } catch(const std::runtime_error& err) {
-    spdlog::error(err.what());
-    std::exit(1);
-  }
+    std::vector<std::string> args(argv, argv + argc);
 
-  std::vector<std::string> args(argv, argv + argc);
+    auto p { cli.get<double>("-p") };
+    auto mem { cli.get("-m") };
+    auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
+    spdlog::info("BloomFilter capacity: {} items", bf.n());
 
-  auto p { cli.get<double>("-p") };
-  auto mem { cli.get("-m") };
-  auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
-  spdlog::info("BloomFilter capacity: {} items", bf.n());
+    auto infname = cli.present("--input");
+    auto outfname = cli.present("--output");
+    auto metricsfname = cli.get("--metrics");
+    std::ifstream inf;
+    std::ofstream outf;
 
-  auto infname = cli.present("--input");
-  auto outfname = cli.present("--output");
-  auto metricsfname = cli.get("--metrics");
-  std::ifstream inf;
-  std::ofstream outf;
-
-  try {
     auto result = process_input_stream(
         infname ? [&]() -> std::istream& {
           inf.open(*infname);
@@ -125,15 +119,16 @@ int main(int argc, char* argv[]) {
       write_metrics(metricsfname, result);
     } else if (cli.get<bool>("--allow-overcapacity")) {
       write_metrics(metricsfname, result);
-      spdlog::warn("BloomFilter at {:.3g}% capacity", 100*cap);
-      spdlog::warn("BloomFilter capacity of {} exceeded: "
-        "false positive rate target of {} is likely violated.", bf.n(), bf.p());
+      spdlog::warn("{} items leaves BloomFilter at {:.3g}% capacity.",
+                   result.templates, 100*cap);
+      spdlog::warn("False positive rate {} exceeded.", bf.p());
     } else {
-      spdlog::error("BloomFilter at {:.3g}% capacity", 100*cap);
-      throw std::runtime_error("BloomFilter capacity exceeded");
+      spdlog::error("{} items leaves BloomFilter at {:.3g}% capacity.",
+                    result.templates, 100*cap);
+      throw std::runtime_error("BloomFilter capacity exceeded.");
     }
-  } catch(const std::runtime_error& err) {
+  } catch(const std::exception& err) {
     spdlog::error(err.what());
-    std::exit(1);
+    return 1;
   }
 }
