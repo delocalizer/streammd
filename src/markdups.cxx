@@ -1,6 +1,4 @@
 #include <fstream>
-#include <iostream>
-
 #include <spdlog/spdlog.h>
 
 #include "bloomfilter.h"

@@ -27,9 +27,29 @@ TEST_CASE("BloomFilter::m_k_min calculation", "[BloomFilter static]") {
   CHECK(k == 20);
 }
 
-TEST_CASE("BloomFilter::fromMemSpec", "[BloomFilter static]"){
+TEST_CASE("BloomFilter::fromMemSpec already pow2", "[BloomFilter static]"){
   auto bf = BloomFilter::fromMemSpec(0.000001, "4GiB");
+  // 4GiB
   CHECK(bf.m() == 4 * std::pow(1024, 3) * 8);
+  CHECK(bf.mpow2() == true);
+  CHECK(bf.k() == 10);
+  CHECK(bf.n() == BloomFilter::capacity(bf.p(), bf.m(), bf.k()));
+}
+
+TEST_CASE("BloomFilter::fromMemSpec not pow2", "[BloomFilter static]"){
+  auto bf = BloomFilter::fromMemSpec(0.000001, "4GB");
+  // 2GiB
+  CHECK(bf.m() == 2 * std::pow(1024, 3) * 8);
+  CHECK(bf.mpow2() == true);
+  CHECK(bf.k() == 10);
+  CHECK(bf.n() == BloomFilter::capacity(bf.p(), bf.m(), bf.k()));
+}
+
+TEST_CASE("BloomFilter::fromMemSpec not pow2, mpow2==false", "[BloomFilter static]"){
+  auto bf = BloomFilter::fromMemSpec(0.000001, "4GB", false);
+  // 4GB
+  CHECK(bf.m() == 4 * std::pow(1000, 3) * 8);
+  CHECK(bf.mpow2() == false);
   CHECK(bf.k() == 10);
   CHECK(bf.n() == BloomFilter::capacity(bf.p(), bf.m(), bf.k()));
 }
@@ -96,6 +116,26 @@ TEST_CASE("BloomFilter FPR bound", "[BloomFilter correctness]") {
   for (size_t i { 0 }; i < n; ++i ) { misses[i] = std::to_string(n+i); }
   for (float p : ps) {
     BloomFilter bf(p, n);
+    for (std::string value : values) {
+      bf.add(value);
+    }
+    size_t fps { 0 };
+    for (size_t i { 0 }; i < n; ++i ) { fps += bf.contains(misses[i]) ? 1 : 0; }
+    auto fpr { float(fps) / n };
+    // 0 <= fpr <= 2p
+    CHECK_THAT(fpr, Catch::Matchers::WithinAbs(p, p));
+  }
+}
+
+TEST_CASE("BloomFilter FPR memspec bound", "[BloomFilter correctness]") {
+  std::vector<float> ps = { 0.001, 0.0001, 0.00001, 0.000001 };
+  std::string mem { "128MiB" };
+  for (auto const& p : ps) {
+    auto bf { BloomFilter::fromMemSpec(p, mem) };
+    auto n { bf.n() };
+    std::vector<std::string> values(n), misses(n);
+    for (size_t i { 0 }; i < n; ++i ) { values[i] = std::to_string(i); }
+    for (size_t i { 0 }; i < n; ++i ) { misses[i] = std::to_string(n+i); }
     for (std::string value : values) {
       bf.add(value);
     }
