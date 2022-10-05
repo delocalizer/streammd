@@ -9,24 +9,24 @@
 
 namespace bloomfilter {
 
-// Create a Bloom filter for target maximum n items and false-positive rate p.
-BloomFilter::BloomFilter(uint64_t n, double p): p_{p}, n_{n} {
-  std::tie(m_, k_) = m_k_min(n_, p_);
+// Create a Bloom filter with false-positive rate p and n items
+BloomFilter::BloomFilter(double p, uint64_t n): p_{p}, n_{n} {
+  std::tie(m_, k_) = m_k_min(p_, n_);
   // dynamic_bitset constructor initializes all to 0
   bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with n={0} p={1} m={2} k={3}", n_, p_, m_, k_);
+  spdlog::info("BloomFilter initialized with p={0} n={1} m={2} k={3}", p_, n_, m_, k_);
 }
 
-// Create a Bloom filter with bit array size m, false-positive rate p and k hash functions.
-BloomFilter::BloomFilter(uint64_t m, double p, size_t k): p_{p}, m_{m}, k_{k} {
-  n_ = capacity(m_, k_, p_);
+// Create a Bloom filter with false-positive rate p, bit array size m, and k hash functions.
+BloomFilter::BloomFilter(double p, uint64_t m, size_t k): p_{p}, m_{m}, k_{k} {
+  n_ = capacity(p_, m_, k_);
   if (n_ <= 0) {
-    spdlog::error("BloomFilter with m={0} p={1} k={2} has zero capacity", m_, p_, k_);
+    spdlog::error("BloomFilter with p={0} m={1} k={2} has zero capacity", p_, m_, k_);
     throw std::runtime_error("zero-capacity BloomFilter");
   }
   // dynamic_bitset constructor initializes all to 0
   bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with n={0} p={1} m={2} k={3}", n_, p_, m_, k_);
+  spdlog::info("BloomFilter initialized with p={0} n={1} m={2} k={3}", p_, n_, m_, k_);
 }
 
 // Check if item is present.
@@ -67,19 +67,19 @@ uint64_t BloomFilter::count_estimate(){
 // Create a Bloom filter from memory spec (m) and false-positive rate p. For
 // simplicity we use fixed k==10 and infer the capacity n. This is more useful
 // in many cases than requiring n and p then inferring m and k.
-BloomFilter BloomFilter::fromMemSpec(std::string mem, double p) {
-  return BloomFilter(8 * bytesize::bytesize::parse(mem), p, 10);
+BloomFilter BloomFilter::fromMemSpec(double p, std::string mem) {
+  return BloomFilter(p, 8 * bytesize::bytesize::parse(mem), 10);
 }
 
-// Return Bloom filter capacity n inferred from m, k and p
-uint64_t BloomFilter::capacity(uint64_t m, size_t k, double p) {
+// Return Bloom filter capacity n inferred from p, m, and k
+uint64_t BloomFilter::capacity(double p, uint64_t m, size_t k) {
   double m_dbl(m), k_dbl(k);
   return std::ceil(m_dbl / (-k_dbl / std::log(1.0 - std::exp(std::log(p) / k_dbl))));
 }
 
 // Return the memory-optimal bitset size m and number of hash functions k
 // for a given number of items to store n and target false positive rate p.
-std::tuple<uint64_t, size_t> BloomFilter::m_k_min(uint64_t n, double p) {
+std::tuple<uint64_t, size_t> BloomFilter::m_k_min(double p, uint64_t n) {
   uint64_t m = std::ceil(n * -std::log(p) / std::pow(std::log(2.0), 2.0));
   size_t k = std::ceil(std::log(2.0) * m/n);
   return { std::tuple<uint64_t, size_t> { m, k } };

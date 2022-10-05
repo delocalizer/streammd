@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
 
   auto n { cli.get<uint64_t>("-n") };
   auto p { cli.get<double>("-p") };
-  auto bf { bloomfilter::BloomFilter(n, p) };
+  auto bf { bloomfilter::BloomFilter(p, n) };
   std::vector<std::string> args(argv, argv + argc);
 
   auto infname = cli.present("--input");
