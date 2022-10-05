@@ -20,10 +20,6 @@ BloomFilter::BloomFilter(double p, uint64_t n): p_{p}, n_{n} {
 // Create a Bloom filter with false-positive rate p, bit array size m, and k hash functions.
 BloomFilter::BloomFilter(double p, uint64_t m, size_t k): p_{p}, m_{m}, k_{k} {
   n_ = capacity(p_, m_, k_);
-  if (n_ <= 0) {
-    spdlog::error("BloomFilter with p={0} m={1} k={2} has zero capacity", p_, m_, k_);
-    throw std::runtime_error("zero-capacity BloomFilter");
-  }
   // dynamic_bitset constructor initializes all to 0
   bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
   spdlog::info("BloomFilter initialized with p={0} n={1} m={2} k={3}", p_, n_, m_, k_);
