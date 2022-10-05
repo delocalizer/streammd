@@ -15,7 +15,7 @@ class BloomFilter {
  public:
 
   BloomFilter(uint64_t n, double p);
-  //BloomFilter(std::string memspec, double p);
+  BloomFilter(uint64_t m, double p, size_t k);
 
   bool contains(const std::string& item);
   bool add(const std::string& item);
@@ -27,6 +27,7 @@ class BloomFilter {
 
   uint64_t count_estimate();
 
+  static BloomFilter fromMemSpec(std::string memspec, double p);
   static uint64_t capacity(uint64_t m, size_t k, double p);
   static std::tuple<uint64_t, size_t> m_k_min(uint64_t n, double p);
 
