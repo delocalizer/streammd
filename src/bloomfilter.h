@@ -30,6 +30,7 @@ class BloomFilter {
 
   static BloomFilter fromMemSpec(double p, std::string memspec, bool mpow2=true);
   static uint64_t capacity(double p, uint64_t m, size_t k);
+  static uint64_t memspec_to_bytes(std::string memspec, bool mpow2=true);
   static std::tuple<uint64_t, size_t> m_k_min(double p, uint64_t n);
 
  private:

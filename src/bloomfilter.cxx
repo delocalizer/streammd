@@ -67,10 +67,24 @@ uint64_t BloomFilter::count_estimate(){
 // Create a Bloom filter from memory spec and false-positive rate p. For
 // simplicity we use fixed k==10 and infer the capacity n. This is more useful
 // in many cases than requiring n and p then inferring m and k. When mpow2 is
-// true and the interpreted value of m is not a power of two, set m to be the
-// nearest power of two less than the interpreted value.
-BloomFilter BloomFilter::fromMemSpec(double p, std::string mem, bool mpow2) {
-  auto m = 8 * bytesize::bytesize::parse(mem);
+// true and the interpreted value of m is not a power of two, the nearest power
+// of two less than the interpreted value is used.
+BloomFilter BloomFilter::fromMemSpec(double p, std::string memspec, bool mpow2) {
+  auto m = 8 * memspec_to_bytes(memspec, mpow2);
+  return BloomFilter(p, m, 10);
+}
+
+// Return Bloom filter capacity n inferred from p, m, and k.
+uint64_t BloomFilter::capacity(double p, uint64_t m, size_t k) {
+  double m_dbl(m), k_dbl(k);
+  return std::ceil(m_dbl / (-k_dbl / std::log(1.0 - std::exp(std::log(p) / k_dbl))));
+}
+
+// Return number of bytes parsed from memory spec. When mpow2 is true and the
+// resulting number is not a power of two, return the nearest power of two less
+// than the parsed value.
+uint64_t BloomFilter::memspec_to_bytes(std::string memspec, bool mpow2) {
+  auto m = bytesize::bytesize::parse(memspec);
   if (mpow2 && ((m & (m-1)) != 0)) {
     size_t pow = 1;
     while (pow < m) {
@@ -78,13 +92,7 @@ BloomFilter BloomFilter::fromMemSpec(double p, std::string mem, bool mpow2) {
     }
     m = pow >> 1;
   }
-  return BloomFilter(p, m, 10);
-}
-
-// Return Bloom filter capacity n inferred from p, m, and k
-uint64_t BloomFilter::capacity(double p, uint64_t m, size_t k) {
-  double m_dbl(m), k_dbl(k);
-  return std::ceil(m_dbl / (-k_dbl / std::log(1.0 - std::exp(std::log(p) / k_dbl))));
+  return m;
 }
 
 // Return the memory-optimal bitset size m and number of hash functions k
