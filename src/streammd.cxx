@@ -38,17 +38,20 @@ int main(int argc, char* argv[]) {
     .help("Output file. [default: STDOUT]")
     .metavar("OUTPUT");
 
-  cli.add_argument("-n", "--n-items")
-    .help("Expected maximum number of templates n.")
-    .default_value(default_n)
-    .metavar("N_ITEMS")
-    .scan<'d', uint64_t>();
-
   cli.add_argument("-p", "--fp-rate")
-    .help("Target maximum false positive rate when n items are stored.")
-    .default_value(default_p)
+    .help("Target maximum false positive rate.")
+    .default_value(double(0.000001))
     .metavar("FP_RATE")
     .scan<'g', double>();
+
+  cli.add_argument("-m", "--mem")
+    .help("Maximum memory allowance for the Bloom filter, e.g \"4GiB\". "
+          "Both binary (kiB|MiB|GiB) and decimal (kB|MB|GB) formats are "
+          "understood but in practice when the interpreted value is not a "
+          "power of two the next lowest power of two is used instead, e.g. "
+          "if 3GB is specified, 2GiB is used.")
+    .default_value(std::string("4GiB"))
+    .metavar("MEM");
 
   cli.add_argument("--allow-overcapacity")
     .help("Warn instead of error when Bloom filter capacity is exceeded. "
@@ -58,7 +61,7 @@ int main(int argc, char* argv[]) {
 
   cli.add_argument("--metrics")
     .help("Output metrics file.")
-    .default_value(default_metrics)
+    .default_value(std::string(pgid + "-metrics.json"))
     .metavar("METRICS_FILE");
 
   cli.add_argument("--single")
@@ -80,10 +83,12 @@ int main(int argc, char* argv[]) {
     std::exit(1);
   }
 
-  auto n { cli.get<uint64_t>("-n") };
-  auto p { cli.get<double>("-p") };
-  auto bf { bloomfilter::BloomFilter(p, n) };
   std::vector<std::string> args(argv, argv + argc);
+
+  auto p { cli.get<float>("-p") };
+  auto mem { cli.get("-m") };
+  auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
+  spdlog::info("BloomFilter capacity: {} items", bf.n());
 
   auto infname = cli.present("--input");
   auto outfname = cli.present("--output");
@@ -116,15 +121,15 @@ int main(int argc, char* argv[]) {
     );
     auto cap { float(result.templates)/bf.n() };
     if (cap <= 1.0) {
-      spdlog::info("BloomFilter: {:.3g}% capacity", 100*cap);
+      spdlog::info("BloomFilter at {:.3g}% capacity", 100*cap);
       write_metrics(metricsfname, result);
     } else if (cli.get<bool>("--allow-overcapacity")) {
       write_metrics(metricsfname, result);
-      spdlog::warn("BloomFilter: {:.3g}% capacity", 100*cap);
+      spdlog::warn("BloomFilter at {:.3g}% capacity", 100*cap);
       spdlog::warn("BloomFilter capacity of {} exceeded: "
         "false positive rate target of {} is likely violated.", bf.n(), bf.p());
     } else {
-      spdlog::error("BloomFilter: {:.3g}% capacity", 100*cap);
+      spdlog::error("BloomFilter at {:.3g}% capacity", 100*cap);
       throw std::runtime_error("BloomFilter capacity exceeded");
     }
   } catch(const std::runtime_error& err) {

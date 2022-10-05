@@ -16,18 +16,15 @@ namespace markdups {
 // DEL sorts last in ASCII
 const char DEL { 127 };
 const char SAM_delimiter { '\t' };
-const float default_p { 0.000001 };
 const uint16_t flag_unmapped      { 4 };
 const uint16_t flag_reverse       { 16 };
 const uint16_t flag_secondary     { 256 };
 const uint16_t flag_duplicate     { 1024 };
 const uint16_t flag_supplementary { 2048 };
 const uint32_t log_interval { 1000000 };
-const uint64_t default_n { 1000000000 };
 const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
-const std::string default_metrics { pgid + "-metrics.json" };
 const std::string unmapped { DEL };
 
 struct metrics {
