@@ -12,17 +12,21 @@ namespace bloomfilter {
 // Create a Bloom filter with false-positive rate p and n items
 BloomFilter::BloomFilter(double p, uint64_t n): p_{p}, n_{n} {
   std::tie(m_, k_) = m_k_min(p_, n_);
+  mpow2_ = ((m_ & (m_-1)) == 0);
+  mask_ = mpow2_ ? (m_-1) : 0;
   // dynamic_bitset constructor initializes all to 0
   bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with p={0} n={1} m={2} k={3}", p_, n_, m_, k_);
+  spdlog::info("BloomFilter initialized with p={0:.3g} n={1} m={2} k={3}", p_, n_, m_, k_);
 }
 
 // Create a Bloom filter with false-positive rate p, bit array size m, and k hash functions.
 BloomFilter::BloomFilter(double p, uint64_t m, size_t k): p_{p}, m_{m}, k_{k} {
   n_ = capacity(p_, m_, k_);
+  mpow2_ = ((m_ & (m_-1)) == 0);
+  mask_ = mpow2_ ? (m_-1) : 0;
   // dynamic_bitset constructor initializes all to 0
   bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with p={0} n={1} m={2} k={3}", p_, n_, m_, k_);
+  spdlog::info("BloomFilter initialized with p={0:.3g} n={1} m={2} k={3}", p_, n_, m_, k_);
 }
 
 // Check if item is present.
@@ -30,7 +34,7 @@ bool BloomFilter::contains(const std::string& item) {
   uint64_t hashes[k_];
   hash(item, hashes);
   for (size_t i = 0; i < k_; i++) {
-    uint64_t pos { hashes[i] % m_ };
+    uint64_t pos { mpow2_ ? hashes[i] & mask_ : hashes[i] % m_ };
     if (!bitset->test(pos)) {
       return false;
     }
@@ -44,7 +48,7 @@ bool BloomFilter::add(const std::string& item) {
   uint64_t hashes[k_];
   hash(item, hashes);
   for (size_t i = 0; i < k_; i++) {
-    uint64_t pos { hashes[i] % m_ };
+    uint64_t pos { mpow2_ ? hashes[i] & mask_ : hashes[i] % m_ };
     if (!bitset->test(pos)) {
       bitset->set(pos);
       added = true;
@@ -60,11 +64,21 @@ uint64_t BloomFilter::count_estimate(){
   return std::ceil((m_/k_) * - std::log(1-(double(bitset->count())/m_)));
 }
 
-// Create a Bloom filter from memory spec (m) and false-positive rate p. For
+// Create a Bloom filter from memory spec and false-positive rate p. For
 // simplicity we use fixed k==10 and infer the capacity n. This is more useful
-// in many cases than requiring n and p then inferring m and k.
-BloomFilter BloomFilter::fromMemSpec(double p, std::string mem) {
-  return BloomFilter(p, 8 * bytesize::bytesize::parse(mem), 10);
+// in many cases than requiring n and p then inferring m and k. When mpow2 is
+// true and the interpreted value of m is not a power of two, set m to be the
+// nearest power of two less than the interpreted value.
+BloomFilter BloomFilter::fromMemSpec(double p, std::string mem, bool mpow2) {
+  auto m = 8 * bytesize::bytesize::parse(mem);
+  if (mpow2 && ((m & (m-1)) != 0)) {
+    size_t pow = 1;
+    while (pow < m) {
+      pow *= 2;
+    }
+    m = pow >> 1;
+  }
+  return BloomFilter(p, m, 10);
 }
 
 // Return Bloom filter capacity n inferred from p, m, and k
