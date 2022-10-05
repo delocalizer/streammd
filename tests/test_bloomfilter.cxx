@@ -8,7 +8,8 @@
 using namespace bloomfilter;
 
 TEST_CASE("BloomFilter::capacity calculation", "[BloomFilter static]") {
-  std::cout << "BloomFilter::capacity(8000000, 10, 0.001): " << BloomFilter::capacity(8000000, 10, 0.001) << std::endl;
+  auto n = BloomFilter::capacity(8000000, 10, 0.001);
+  CHECK(n == 556420);
 }
 
 TEST_CASE("BloomFilter::m_k_min calculation", "[BloomFilter static]") {
@@ -24,6 +25,9 @@ TEST_CASE("BloomFilter::m_k_min calculation", "[BloomFilter static]") {
   std::tie(m, k) = BloomFilter::m_k_min(1000000000, 0.000001);
   CHECK(m == 28755175133);
   CHECK(k == 20);
+}
+
+TEST_CASE("BloomFilter::fromMemSpec", "[BloomFilter static]"){
 }
 
 TEST_CASE("BloomFilter::add missing", "[BloomFilter functionality]") {
