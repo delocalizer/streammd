@@ -1,3 +1,0 @@
-bitarray ~= 2.6
-humanfriendly ~= 10.0
-pyfarmhash ~= 0.3.2
