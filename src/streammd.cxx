@@ -85,7 +85,7 @@ int main(int argc, char* argv[]) {
 
   std::vector<std::string> args(argv, argv + argc);
 
-  auto p { cli.get<float>("-p") };
+  auto p { cli.get<double>("-p") };
   auto mem { cli.get("-m") };
   auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
   spdlog::info("BloomFilter capacity: {} items", bf.n());
