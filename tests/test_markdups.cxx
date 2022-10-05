@@ -206,7 +206,7 @@ TEST_CASE("markdups::process_qname_group not single", "[process_qname_group]"){
   SamRecord pair1_r2("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t147\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\tBDDDDDDEDDFHHHHHHJIJIJJJJJIJJJIJJJJJJJJJIIJJIJJJIIIJJIJJJJJIJJJJIJJJJJJJJJJJJJJJIJJJJJJJHHHHHFFFFFCCB\tNM:i:0\tAS:i:101\tXS:i:21");
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   std::stringstream os;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   size_t reads_per_template = 1;
   CHECK_THROWS_WITH(
@@ -220,7 +220,7 @@ TEST_CASE("markdups::process_qname_group not paired", "[process_qname_group]"){
   SamRecord sr1("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
   std::vector<SamRecord> qn1 { sr1 };
   std::stringstream os;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   size_t reads_per_template = 2;
   CHECK_THROWS_WITH(
@@ -240,7 +240,7 @@ TEST_CASE("markdups::process_qname_group strip_previous==false", "[process_qname
   REQUIRE(sr2.flag() == 0); 
   REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
   std::stringstream os;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, false);
   process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, false);
@@ -265,7 +265,7 @@ TEST_CASE("markdups::process_qname_group strip_previous==true", "[process_qname_
   REQUIRE(sr2.flag() == 0); 
   REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
   std::stringstream os;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   uint64_t n_tpl_dup {0}, n_aln_dup {0};
   process_qname_group(qn1, os, bf, n_tpl_dup, n_aln_dup, 1, true);
   process_qname_group(qn2, os, bf, n_tpl_dup, n_aln_dup, 1, true);
@@ -286,7 +286,7 @@ TEST_CASE("markdups::process_input_stream single reads", "[process_input_stream]
   "NB551151:333:fake1:3:13509:15168:5615\t16\tchr1\t4502637\t255\t75M1S\t*\t0\t0\tGGATGTCCTCACCCTAGTCAGACCAATGTTGGCCCACACATTCTTTGCAGGAACCCCACAGAAATTGTAGTACCCC\tEEEEEEEEEAEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEAEEEEEEEEEEAEEEEEEEEEAAAAA\tNH:i:1\tHI:i:1\tAS:i:73\tnM:i:0\tNM:i:0\tMD:Z:75\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ba5a08e7-a5f7-48ce-b8f8-c0f223463c29\n"
   "NB551151:333:fake1:4:12509:22440:18769\t16\tchr1\t4505378\t255\t76M\t*\t0\t0\tAAATCAACCCTTTCCTCTTCAACTTGTCTTGGTCATGGTGTTTCATCACAGCAATAGTAACCCTAACTAAAACAGG\tEEE<E/AEEAAEE/EEEEEA6/EEEEEEEE6AAEEEAEEEEE/EEEAEEEEEEEEEEEE//EAEEAEEEA/AA/AA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\n" };
   std::stringstream out;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 1);
   CHECK(result.templates == 4);
@@ -304,7 +304,7 @@ TEST_CASE("markdups::process_input_stream paired reads", "[process_input_stream]
     "HWI-ST1213:151:C1DTBACXX:2:2106:1715:59565\t163\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHFHIJJJFHIJJJJJJJJJJJJJJJJJJJJIJJJIIJIJJHHIIJJHIGIIGIJIJJIJJJIIJHIHHFFFFFFFEEEDEDEDDDDDDDC\tNM:i:0\tMD:Z:101\tAS:i:101\tXS:i:25\n"
   };
   std::stringstream out;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 2);
   CHECK(result.templates == 2);
@@ -321,7 +321,7 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
     "HWI-ST1213:151:C1DTBACXX:2:2207:13476:31678\t141\t*\t0\t0\t*\t*\t0\t0\tCTTCTGTTGAGGGGGTATGGGGACTGAGTGTCATTGTACATCTTTTGCAGGCTTTCCACGGCCACCGCGTGGTTGCCCAGCTTGATGACGGCGGCTG\tCCCFFFFFGHHHHJJ?FHIIJJHIJJIJHIIIJJJJGIJIJJJJJJIJIJGHIJIJHHHHFFDDDDDDDBDDADDDDDDDDDDDDDDEDDBDD><.9\tAS:i:0\tXS:i:0\n"
   };
   std::stringstream out;
-  bloomfilter::BloomFilter bf(1000, 0.001);
+  bloomfilter::BloomFilter bf(0.001, 1000);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(in, out, bf, cli_args, 2);
   CHECK(result.templates == 1);
@@ -345,7 +345,7 @@ TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
         std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
     }
   }
-  bloomfilter::BloomFilter bf(1000000, 0.000001);
+  bloomfilter::BloomFilter bf(0.000001, 1000000);
   std::vector<std::string> cli_args { "dummy", "args" };
   auto result = process_input_stream(testinstrm, testoutstrm, bf, cli_args, 2);
   CHECK(result.templates == 2027);
