@@ -119,12 +119,13 @@ int main(int argc, char* argv[]) {
       write_metrics(metricsfname, result);
     } else if (cli.get<bool>("--allow-overcapacity")) {
       write_metrics(metricsfname, result);
-      spdlog::warn("BloomFilter at {:.3g}% capacity", 100*cap);
-      spdlog::warn("BloomFilter capacity of {} exceeded: "
-        "false positive rate target of {} is likely violated.", bf.n(), bf.p());
+      spdlog::warn("{} items leaves BloomFilter at {:.3g}% capacity.",
+                   result.templates, 100*cap);
+      spdlog::warn("False positive rate {} exceeded.", bf.p());
     } else {
-      spdlog::error("BloomFilter at {:.3g}% capacity", 100*cap);
-      throw std::runtime_error("BloomFilter capacity exceeded");
+      spdlog::error("{} items leaves BloomFilter at {:.3g}% capacity.",
+                    result.templates, 100*cap);
+      throw std::runtime_error("BloomFilter capacity exceeded.");
     }
   } catch(const std::exception& err) {
     spdlog::error(err.what());
