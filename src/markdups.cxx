@@ -142,6 +142,9 @@ std::deque<std::string> template_ends(
   // because rname can end in a digit and we need string values that distinguish
   // between ("chr1", 1234) and ("chr11", 234).
   std::deque<std::string> ends;
+  std::string rname, rname_prev { unmapped };
+  int32_t pos, pos_prev { posmax };
+  char orient;
 
   for (auto read : qname_group) {
     // use only primary alignments for end calculation
@@ -150,12 +153,25 @@ std::deque<std::string> template_ends(
     // unmapped
     } else if (read.flag() & flag_unmapped){
       ends.emplace_back(unmapped);
-    // reverse
-    } else if (read.flag() & flag_reverse) {
-      ends.emplace_back(read.rname() + 'R' + std::to_string(read.end_pos()));
-    // forward
+      rname_prev = unmapped;
+      pos_prev = posmax;
     } else {
-      ends.emplace_front(read.rname() + 'F' + std::to_string(read.start_pos()));
+      rname = read.rname();
+      if (read.flag() & flag_reverse){
+        orient = 'R';
+        pos = read.end_pos();
+      } else {
+        orient = 'F';
+        pos = read.start_pos();
+      }
+      if ((rname > rname_prev) ||
+          (rname == rname_prev && pos >= pos_prev)) {
+        ends.emplace_back(rname + orient + std::to_string(pos));
+      } else {
+        ends.emplace_front(rname + orient + std::to_string(pos));
+      }
+      rname_prev = rname;
+      pos_prev = pos;
     }
   }
   return ends;

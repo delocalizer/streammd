@@ -16,6 +16,7 @@ namespace markdups {
 // DEL sorts last in ASCII
 const char DEL { 127 };
 const char SAM_delimiter { '\t' };
+const int32_t posmax { INT32_MAX };
 const uint16_t flag_unmapped      { 4 };
 const uint16_t flag_reverse       { 16 };
 const uint16_t flag_secondary     { 256 };
