@@ -133,8 +133,8 @@ void process_qname_group(
   }
 }
 
-// Calculate template ends from the primary alignments of the qname group.
-// Unmapped reads sort last by construction.
+// Calculate ordered template ends from the primary alignments of the qname
+// group. Unmapped reads sort last by construction.
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group) {
 
@@ -146,6 +146,10 @@ std::deque<std::string> template_ends(
   int32_t pos, pos_prev { posmax };
   char orient;
 
+  // Profiling shows most of the time we're doing bitarray ops (not hashing,
+  // which seems surprising) but if there's more performance to be had elsewhere 
+  // this is where to find it — we're not particularly clever about how we make
+  // the template ends signature.
   for (auto read : qname_group) {
     // use only primary alignments for end calculation
     if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
@@ -166,9 +170,12 @@ std::deque<std::string> template_ends(
       }
       if ((rname > rname_prev) ||
           (rname == rname_prev && pos >= pos_prev)) {
-        ends.emplace_back(rname + orient + std::to_string(pos));
+        // This suggests fmt is faster than std::to_string:
+        // https://www.zverovich.net/2013/09/07/integer-to-string-conversion-in-cplusplus.html
+        // and that's borne out by gprof
+        ends.emplace_back(rname + orient + fmt::format_int(pos).c_str());
       } else {
-        ends.emplace_front(rname + orient + std::to_string(pos));
+        ends.emplace_front(rname + orient + fmt::format_int(pos).c_str());
       }
       rname_prev = rname;
       pos_prev = pos;
