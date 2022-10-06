@@ -152,7 +152,7 @@ class SamRecord {
       // update the buffer from the end (PG first then FLAG) so the parsed idx
       // values are valid this one time.
       buffer.replace(pgidx_, pglen_, pgtagval_);
-      buffer.replace(flagidx_, flaglen_, std::to_string(flag_));
+      buffer.replace(flagidx_, flaglen_, fmt::format_int(flag_).c_str());
     }
   }
 
