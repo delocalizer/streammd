@@ -146,7 +146,7 @@ class SamRecord {
     auto prev = flag_;
     flag_ = set
       ? (flag_ | flag_duplicate)
-      : (flag_ ^ flag_duplicate);
+      : (flag_ & ~flag_duplicate);
     if (flag_ != prev) {
       // update the buffer from the end (PG first then FLAG) so the parsed idx
       // values are valid this one time.
