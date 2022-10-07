@@ -1,1 +1,1 @@
-autoreconf --install
+autoreconf --install -f
