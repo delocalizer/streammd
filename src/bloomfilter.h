@@ -28,9 +28,9 @@ class BloomFilter {
 
   uint64_t count_estimate();
 
-  static BloomFilter fromMemSpec(double p, std::string memspec, bool mpow2=true);
+  static BloomFilter fromMemSpec(double p, std::string memspec, bool mpow2=false);
   static uint64_t capacity(double p, uint64_t m, size_t k);
-  static uint64_t memspec_to_bytes(std::string memspec, bool mpow2=true);
+  static uint64_t memspec_to_bytes(std::string memspec, bool mpow2=false);
   static std::tuple<uint64_t, size_t> m_k_min(double p, uint64_t n);
 
  private:
@@ -44,9 +44,11 @@ class BloomFilter {
   uint64_t n_;
   uint64_t m_;
   size_t k_;
+  // if m_ is a power of 2 we can use a bitmask instead of % for hash addressing
   bool mpow2_;
   uint64_t mask_;
 
+  void initialize();
   void hash(const std::string& item, uint64_t* buf);
   std::unique_ptr<sul::dynamic_bitset<>> bitset;
   

@@ -37,7 +37,7 @@ TEST_CASE("BloomFilter::fromMemSpec already pow2", "[BloomFilter static]"){
 }
 
 TEST_CASE("BloomFilter::fromMemSpec not pow2", "[BloomFilter static]"){
-  auto bf = BloomFilter::fromMemSpec(0.000001, "4GB");
+  auto bf = BloomFilter::fromMemSpec(0.000001, "4GB", true);
   // 2GiB
   CHECK(bf.m() == 2 * std::pow(1024, 3) * 8);
   CHECK(bf.mpow2() == true);
