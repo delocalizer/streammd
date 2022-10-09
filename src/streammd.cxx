@@ -46,11 +46,11 @@ int main(int argc, char* argv[]) {
     .scan<'g', double>();
 
   cli.add_argument("-m", "--mem")
-    .help("Maximum memory allowance for the Bloom filter, e.g \"4GiB\". "
-          "Both binary (kiB|MiB|GiB) and decimal (kB|MB|GB) formats are "
-          "understood but in practice when the interpreted value is not a "
-          "power of two the next lowest power of two is used instead, e.g. "
-          "if 3GB is specified, 2GiB is used.")
+    .help("Memory allowance for the Bloom filter, e.g \"4GiB\". Both binary "
+          "(kiB|MiB|GiB) and decimal (kB|MB|GB) formats are understood. "
+          "As a result of implementation details, a value that is an exact "
+          "power of 2 (512MiB, 1GiB, 2GiB etc) gives a modest processing "
+          "speed advantage (~5%) over neighbouring values.")
     .default_value(std::string("4GiB"))
     .metavar("MEM");
 
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
     auto mem { cli.get("-m") };
 
     if (cli.get<bool>("--show-capacity")){
-      auto mem_actual { bloomfilter::BloomFilter::memspec_to_bytes(mem) };
+      auto mem_actual { bloomfilter::BloomFilter::memspec_to_bytes(mem, false) };
       auto mem_actual_str { bytesize::bytesize(mem_actual).format() };
       std::cout << "specified fp-rate:       " << p << std::endl;
       std::cout << "specified mem:           " << mem << std::endl;
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
       return 0;
     }
 
-    auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem) };
+    auto bf { bloomfilter::BloomFilter::fromMemSpec(p, mem, false) };
     spdlog::info("BloomFilter capacity: {} items", bf.n());
 
     auto infname = cli.present("--input");

@@ -12,21 +12,13 @@ namespace bloomfilter {
 // Create a Bloom filter with false-positive rate p and n items
 BloomFilter::BloomFilter(double p, uint64_t n): p_{p}, n_{n} {
   std::tie(m_, k_) = m_k_min(p_, n_);
-  mpow2_ = ((m_ & (m_-1)) == 0);
-  mask_ = mpow2_ ? (m_-1) : 0;
-  // dynamic_bitset constructor initializes all to 0
-  bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with p={0:.3g} n={1} m={2} k={3}", p_, n_, m_, k_);
+  initialize();
 }
 
 // Create a Bloom filter with false-positive rate p, bit array size m, and k hash functions.
 BloomFilter::BloomFilter(double p, uint64_t m, size_t k): p_{p}, m_{m}, k_{k} {
   n_ = capacity(p_, m_, k_);
-  mpow2_ = ((m_ & (m_-1)) == 0);
-  mask_ = mpow2_ ? (m_-1) : 0;
-  // dynamic_bitset constructor initializes all to 0
-  bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
-  spdlog::info("BloomFilter initialized with p={0:.3g} n={1} m={2} k={3}", p_, n_, m_, k_);
+  initialize();
 }
 
 // Check if item is present.
@@ -101,6 +93,17 @@ std::tuple<uint64_t, size_t> BloomFilter::m_k_min(double p, uint64_t n) {
   uint64_t m = std::ceil(n * -std::log(p) / std::pow(std::log(2.0), 2.0));
   size_t k = std::ceil(std::log(2.0) * m/n);
   return { std::tuple<uint64_t, size_t> { m, k } };
+}
+
+// Initialize the bitset; set mpow2_ and mask_; log state.
+void BloomFilter::initialize(){
+  // dynamic_bitset constructor initializes all to 0
+  bitset = std::unique_ptr<sul::dynamic_bitset<>>(new sul::dynamic_bitset(m_));
+  mpow2_ = ((m_ & (m_-1)) == 0);
+  mask_ = mpow2_ ? (m_-1) : 0;
+  spdlog::info("BloomFilter initialized with p={0:.3g} n={1} m={2} k={3}", p_, n_, m_, k_);
+  spdlog::debug("mpow2={0}; {1} will be used for hash addressing", mpow2_,
+                mpow2_ ? "bit mask" : "modulus");
 }
 
 // Generate k hash values for the item.

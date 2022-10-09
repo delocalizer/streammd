@@ -1,5 +1,7 @@
 ## Notes
 
+* https://google.github.io/styleguide/cppguide.html is taken _very roughly_ as
+  a style guide
 * `dnf install autoconf-archive` was required to get all autotools macros recognized.
 * PFL "The Pitchfork" project layout is used
 * .cxx is used for c++ source.
