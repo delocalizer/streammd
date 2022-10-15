@@ -1,3 +1,4 @@
+.vscode
 *.log
 *.tar.gz
 streammd-metrics.json
