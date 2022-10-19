@@ -3,6 +3,7 @@
 *.tar.gz
 streammd-metrics.json
 Makefile
+!external/xxHash/Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache/

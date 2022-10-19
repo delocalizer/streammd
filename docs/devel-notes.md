@@ -6,6 +6,8 @@
 * PFL "The Pitchfork" project layout is used
 * .cxx is used for c++ source.
 * .h is used for header files.
+* external/xxHash/Makefile was edited to comment out the install and uninstall
+  targets, and provide a no-op distdir target
 
 ## Release
 
