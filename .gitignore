@@ -4,6 +4,9 @@
 streammd-metrics.json
 Makefile
 !external/xxHash/Makefile
+!external/xxHash/tests/bench/Makefile
+!external/xxHash/tests/collisions/Makefile
+!external/xxHash/tests/Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache/
