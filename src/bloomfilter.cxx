@@ -2,7 +2,7 @@
 
 #include <bytesize/bytesize.hh>
 #include <dynamic_bitset/dynamic_bitset.hpp>
-#include <xxhash_cpp/xxhash.hpp>
+#include <xxHash/xxhash.h>
 #include <spdlog/spdlog.h>
 
 #include "bloomfilter.h"
@@ -113,8 +113,10 @@ void BloomFilter::initialize(){
 //
 // Ref: Kirsch & Mitzenmacher (2006) https://doi.org/10.1007/11841036_42
 void BloomFilter::hash(const std::string& item, uint64_t* buf) {
-  uint64_t a { xxh::xxhash3<64>(item, seed1_) };
-  uint64_t b { xxh::xxhash3<64>(item, seed2_) };
+  auto cstr { item.c_str() };
+  auto len { item.length() };
+  auto a { XXH3_64bits_withSeed(cstr, len, seed1_) };
+  auto b { XXH3_64bits_withSeed(cstr, len, seed2_) };
   for (size_t i = 0; i < k_; i++) {
     buf[i] = a;
     a += b;
