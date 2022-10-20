@@ -26,6 +26,8 @@ const uint32_t log_interval { 1000000 };
 const std::regex re_pgid { R"(\tID:([^\t]+))" };
 const std::string pgid { "streammd"  };
 const std::string pgtag { "PG:Z:" };
+const std::string _pgtag { SAM_delimiter + pgtag };
+const std::string pgtagval { _pgtag + pgid };
 const std::string unmapped { DEL };
 
 struct metrics {
@@ -81,7 +83,7 @@ class SamRecord {
     cigarlen_ = stop - start;
 
     // pg
-    start=stop+1; stop=buffer.find(pgtag_, start);
+    start=stop+1; stop=buffer.find(_pgtag, start);
     if (stop == std::string::npos) {
       pgidx_ = buffer.length();
       pglen_ = 0;
@@ -151,14 +153,12 @@ class SamRecord {
     if (flag_ != prev) {
       // update the buffer from the end (PG first then FLAG) so the parsed idx
       // values are valid this one time.
-      buffer.replace(pgidx_, pglen_, pgtagval_);
+      buffer.replace(pgidx_, pglen_, pgtagval);
       buffer.replace(flagidx_, flaglen_, fmt::format_int(flag_).c_str());
     }
   }
 
  private:
-  inline static const std::string pgtag_ { std::string(1, SAM_delimiter) + pgtag };
-  inline static const std::string pgtagval_ { pgtag_ + pgid };
   std::string qname_;
   size_t flagidx_;
   size_t flaglen_;

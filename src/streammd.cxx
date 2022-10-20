@@ -114,16 +114,14 @@ int main(int argc, char* argv[]) {
         infname ? [&]() -> std::istream& {
           inf.open(*infname);
           if (!inf) {
-            std::string errmsg { *infname + " cannot be opened for reading" };
-            throw std::runtime_error(errmsg);
+            throw std::runtime_error(*infname + " cannot be opened for reading");
           }
           return inf;
         }() : std::cin,
         outfname ? [&]() -> std::ostream& {
           outf.open(*outfname);
           if (!outf) {
-            std::string errmsg { *outfname + " cannot be opened for writing" };
-            throw std::runtime_error(errmsg);
+            throw std::runtime_error(*outfname + " cannot be opened for writing");
           }
           return outf;
         }() : std::cout,
