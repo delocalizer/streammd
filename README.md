@@ -153,11 +153,6 @@ optimal throughput:
 ```bash
 samtools view -h some.bam|streammd|samtools view -@2 -o some.MD.bam
 ```
-
-### History
-
-`streammd` version 4.0 is a complete rewrite in C++.
-
 ### Citing
 
 Please cite https://doi.org/10.1101/2022.10.12.511997 when referring to `streammd` in publications.
