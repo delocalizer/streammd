@@ -65,6 +65,11 @@ int main(int argc, char* argv[]) {
     .default_value(std::string(pgid + "-metrics.json"))
     .metavar("METRICS_FILE");
 
+  cli.add_argument("--remove-duplicates")
+    .help("Omit detected duplicates from the output.")
+    .default_value(false)
+    .implicit_value(true);
+
   cli.add_argument("--show-capacity")
     .help("Do no work, just print the capacity of the Bloom filter that would "
           "be constructed with the given --fp-rate and --mem values.")
@@ -128,7 +133,8 @@ int main(int argc, char* argv[]) {
         bf,
         args,
         cli.get<bool>("--single") ? 1 : 2,
-        cli.get<bool>("--strip-previous")
+        cli.get<bool>("--strip-previous"),
+        cli.get<bool>("--remove-duplicates")
     );
     auto cap { float(result.templates)/bf.n() };
     if (cap <= 1.0) {
