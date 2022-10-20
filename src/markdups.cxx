@@ -194,27 +194,24 @@ void write_metrics(std::string metricsfname, metrics metrics) {
   spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
   spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
 
-  // std::format doesn't arrive till c++20 so format file output with ye olde
-  // fprintf. Note that spdlog includes fmt lib but using that would tie us to
-  // spdlog for logging.
-  FILE* metricsf { fopen(metricsfname.c_str(), "w") };
-  if (nullptr == metricsf) {
+  std::ofstream metricsf;
+  metricsf.open(metricsfname);
+  if (!metricsf) {
     throw std::runtime_error(metricsfname + " cannot be opened for writing");
-  } else {
-    fprintf(metricsf,
-        "{"
-          "\"ALIGNMENTS\":%lu,"
-          "\"ALIGNMENTS_MARKED_DUPLICATE\":%lu,"
-          "\"TEMPLATES\":%lu,"
-          "\"TEMPLATES_MARKED_DUPLICATE\":%lu,"
-          "\"TEMPLATE_DUPLICATE_FRACTION\":%0.4f"
-        "}",
-        metrics.alignments,
-        metrics.alignments_marked_duplicate,
-        metrics.templates,
-        metrics.templates_marked_duplicate,
-        dup_frac);
   }
+  metricsf << fmt::format(
+    "{{"
+      "\"ALIGNMENTS\":{},"
+      "\"ALIGNMENTS_MARKED_DUPLICATE\":{},"
+      "\"TEMPLATES\":{},"
+      "\"TEMPLATES_MARKED_DUPLICATE\":{},"
+      "\"TEMPLATE_DUPLICATE_FRACTION\":{:.4f}"
+    "}}", 
+    metrics.alignments,
+    metrics.alignments_marked_duplicate,
+    metrics.templates,
+    metrics.templates_marked_duplicate,
+    dup_frac);
 }
 
 }
