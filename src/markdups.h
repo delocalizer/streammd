@@ -193,7 +193,8 @@ metrics process_input_stream(
     bloomfilter::BloomFilter& bf,
     std::vector<std::string> cli_args,
     size_t reads_per_template = 2,
-    bool strip_previous = false);
+    bool strip_previous = false,
+    bool remove_duplicates = false);
 
 void pgline(
     std::ostream& out,
@@ -207,7 +208,8 @@ void process_qname_group(
     uint64_t& n_tpl_dup,
     uint64_t& n_aln_dup,
     size_t reads_per_template = 2,
-    bool strip_previous = false);
+    bool strip_previous = false,
+    bool remove_duplicates = false);
 
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group);

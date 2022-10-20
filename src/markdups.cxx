@@ -15,7 +15,8 @@ metrics process_input_stream(
     bloomfilter::BloomFilter& bf,
     std::vector<std::string> cli_args,
     size_t reads_per_template,
-    bool strip_previous) {
+    bool strip_previous,
+    bool remove_duplicates) {
 
   bool header_done { false };
   uint64_t n_tpl { 0 }, n_aln {0}, n_tpl_dup {0}, n_aln_dup {0};
@@ -43,8 +44,8 @@ metrics process_input_stream(
           spdlog::debug("qnames seen: {0}", n_tpl);
         }
         if (qname_group.size()) {
-          process_qname_group(qname_group, out, bf,
-              n_tpl_dup, n_aln_dup, reads_per_template, strip_previous);
+          process_qname_group(qname_group, out, bf, n_tpl_dup, n_aln_dup,
+              reads_per_template, strip_previous, remove_duplicates);
           qname_group.clear();
         }
         qname_prev = samrecord.qname();
@@ -53,8 +54,8 @@ metrics process_input_stream(
     }
   }
   // handle the last group
-  process_qname_group(qname_group, out, bf,
-      n_tpl_dup, n_aln_dup, reads_per_template, strip_previous);
+  process_qname_group(qname_group, out, bf, n_tpl_dup, n_aln_dup,
+      reads_per_template, strip_previous, remove_duplicates);
   return metrics { n_tpl, n_tpl_dup, n_aln, n_aln_dup };
 }
 
@@ -94,7 +95,8 @@ void process_qname_group(
     uint64_t& n_tpl_dup,
     uint64_t& n_aln_dup,
     size_t reads_per_template,
-    bool strip_previous) {
+    bool strip_previous,
+    bool remove_duplicates) {
 
   // calculate ends
   auto ends = template_ends(qname_group);
@@ -121,6 +123,9 @@ void process_qname_group(
     for (auto & read : qname_group) {
       n_aln_dup += 1;
       read.update_dup_status(true);
+    }
+    if (remove_duplicates) {
+      return;
     }
   } else if (strip_previous) {
     for (auto & read : qname_group) {
