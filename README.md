@@ -74,14 +74,13 @@ streammd --help
 ```
 
 ```
-Usage: streammd [-h] [--input INPUT] [--output OUTPUT] [--fp-rate FP_RATE]
-                [--mem MEM] [--allow-overcapacity] [--metrics METRICS_FILE]
+Usage: streammd [-h] [--input INPUT] [--output OUTPUT] [--fp-rate FP_RATE] [--mem MEM]
+                [--allow-overcapacity] [--metrics METRICS_FILE] [--remove-duplicates]
                 [--show-capacity] [--single] [--strip-previous]
 
-Read a SAM file from STDIN, mark duplicates in a single pass and stream
-processed records to STDOUT. Input must begin with a valid SAM header followed
-by qname-grouped records. Default log level is 'info' — set to something else
-(e.g. 'debug') via SPDLOG_LEVEL environment variable.
+Read a SAM file from STDIN, mark duplicates in a single pass and stream processed records to STDOUT.
+Input must begin with a valid SAM header followed by qname-grouped records. Default log level is
+'info' — set to something else (e.g. 'debug') via SPDLOG_LEVEL environment variable.
 
 Optional arguments:
   -h, --help            	shows help message and exits 
@@ -89,27 +88,21 @@ Optional arguments:
   --input INPUT         	Input file. [default: STDIN] 
   --output OUTPUT       	Output file. [default: STDOUT] 
   -p, --fp-rate FP_RATE 	Target maximum false positive rate. [default: 1e-06]
-  -m, --mem MEM         	Memory allowance for the Bloom filter, e.g
-                                "4GiB". Both binary (kiB|MiB|GiB) and decimal
-                                (kB|MB|GB) formats are understood. As a result of
-                                implementation details, a value that is an exact
-                                power of 2 (512MiB, 1GiB, 2GiB etc) gives a
-                                modest processing speed advantage (~5%) over
-                                neighbouring values. [default: "4GiB"]
-  --allow-overcapacity  	Warn instead of error when Bloom filter capacity
-                                is exceeded. [default: false] 
-  --metrics METRICS_FILE	Output metrics file.
-                                [default: "streammd-metrics.json"]
-  --show-capacity       	Do no work, just print the capacity of the Bloom
-                                filter that would be constructed with the given
-                                --fp-rate and --mem values. 
-  --single              	Accept single-ended reads as input.
-                                [default: paired-end] 
-  --strip-previous      	Unset duplicate flag for any reads that have it
-                                set and are no longer considered duplicate. Only
-                                ever required if records have previously been
-                                through a duplicate marking step.
-                                [default: false]
+  -m, --mem MEM         	Memory allowance for the Bloom filter, e.g "4GiB". Both binary
+                                (kiB|MiB|GiB) and decimal (kB|MB|GB) formats are understood. As a
+                                result of implementation details, a value that is an exact power
+                                of 2 (512MiB, 1GiB, 2GiB etc) gives a modest processing speed
+                                advantage (~5%) over neighbouring values. [default: "4GiB"]
+  --allow-overcapacity  	Warn instead of error when Bloom filter capacity is exceeded.
+                                [default: false] 
+  --metrics METRICS_FILE	Output metrics file. [default: "streammd-metrics.json"]
+  --remove-duplicates   	Omit detected duplicates from the output. 
+  --show-capacity       	Do no work, just print the capacity of the Bloom filter that would
+                                be constructed with the given --fp-rate and --mem values. 
+  --single              	Accept single-ended reads as input. [default: paired-end] 
+  --strip-previous      	Unset duplicate flag for any reads that have it set and are no
+                                longer considered duplicate. Only ever required if records have
+                                previously been through a duplicate marking step. [default: false]
 ```
 
 1. mark duplicates on an input SAM file record stream 
