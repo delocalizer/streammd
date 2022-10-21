@@ -16,6 +16,7 @@
 * git tag [version]
 * git push origin [version]
 * ./autogen.sh  # AC_INIT picks up version from src/version.h
+* make clean    # ensure no build artifacts in external/ which is included as-is in the tarball
 * make dist     # creates streammd-[version].tar.gz
 * In GitHub, draft new release from the tag and manually add the generated tarball
   to the release.
