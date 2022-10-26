@@ -136,7 +136,7 @@ int main(int argc, char* argv[]) {
         cli.get<bool>("--strip-previous"),
         cli.get<bool>("--remove-duplicates")
     );
-    auto cap { float(result.templates)/bf.n() };
+    auto cap { float(result.templates - result.templates_marked_duplicate)/bf.n() };
     if (cap <= 1.0) {
       spdlog::info("BloomFilter at {:.3g}% capacity", 100*cap);
       write_metrics(metricsfname, result);
