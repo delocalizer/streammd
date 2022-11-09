@@ -2,6 +2,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <spdlog/spdlog.h>
 #include "markdups.h"
 #include "version.h"
 
@@ -13,469 +14,340 @@
  * Replicate relevant tests from picard/src/test/java/picard/sam/markduplicates
  ******************************************************************************/
 
+// (QNAME, RNAME, POS)
+typedef std::tuple<std::string, std::string, size_t> SamRecordId;
+typedef std::map<SamRecordId, uint16_t> SamRecordFlags;
+
 using namespace markdups;
 
+// Populate SAM flags map from SAM record input stream
+void record_flags(std::istream& instream, SamRecordFlags& flags) {
+  for (SamRecord sr; std::getline(instream, sr.buffer); ) {
+    if (sr.buffer[0] != '@') {
+      sr.parse();
+      flags[std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
+    }
+  }
+}
+
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleUnmappedFragment",
+  "MarkDuplicatesTestQueryNameSorted.testBulkFragmentsNoDuplicates[0]",
   "[picard tests]"){
-  std::stringstream in {
-    "READ1\t4\t*\t0\t0\t*\t*\t0\t10\tAAAAAAAAAA\t++++++++++\n"
-  };
-  std::stringstream out;
-  bloomfilter::BloomFilter bf(0.001, 1000);
+  std::ifstream test_input, expected_output;
+  SamRecordFlags marked_flags, expected_flags;
+  test_input.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkFragmentsNoDuplicates[0]/input.sam");
+  expected_output.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkFragmentsNoDuplicates[0]/output.sam");
+  record_flags(expected_output, expected_flags);
+
+  std::ostringstream test_output;
+  bloomfilter::BloomFilter bf(0.000001, 1000000);
   std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(in, out, bf, cli_args, 1);
-  std::string line;
-  std::getline(out, line); // consume @PG line
-  std::getline(out, line);
-  SamRecord sr1(line);
-  CHECK(!(sr1.flag() & flag_duplicate));
-  CHECK(result.templates == 1);
-  CHECK(result.templates_marked_duplicate == 0);
-  CHECK(result.alignments == 1);
-  CHECK(result.alignments_marked_duplicate == 0);
+  process_input_stream(test_input, test_output, bf, cli_args, 1);
+  auto outlines { std::istringstream(test_output.str()) };
+  record_flags(outlines, marked_flags);
+
+  for (auto const& [key, val]: expected_flags) {
+    INFO(fmt::format("SamRecordId: {}:{}:{}",
+                     std::get<0>(key), std::get<1>(key), std::get<2>(key)));
+    CHECK(marked_flags[key] == val);
+  }
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoUnmappedFragments",
+  "MarkDuplicatesTestQueryNameSorted.testBulkFragmentsWithDuplicates[0]",
   "[picard tests]"){
-  std::stringstream in {
-    "READ1\t4\t*\t0\t0\t*\t*\t0\t10\tAAAAAAAAAA\t++++++++++\n"
-    "READ2\t4\t*\t0\t0\t*\t*\t0\t10\tAAAAAAAAAA\t++++++++++\n"
-  };
-  std::stringstream out;
-  bloomfilter::BloomFilter bf(0.001, 1000);
+  std::ifstream test_input, expected_output;
+  SamRecordFlags marked_flags, expected_flags;
+  test_input.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkFragmentsWithDuplicates[0]/input.sam");
+  expected_output.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkFragmentsWithDuplicates[0]/output.sam");
+  record_flags(expected_output, expected_flags);
+
+  std::ostringstream test_output;
+  bloomfilter::BloomFilter bf(0.000001, 1000000);
   std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(in, out, bf, cli_args, 1);
-  std::string line;
-  std::getline(out, line); // consume @PG line
-  std::getline(out, line);
-  SamRecord sr1(line);
-  std::getline(out, line);
-  SamRecord sr2(line);
-  CHECK(!(sr1.flag() & flag_duplicate));
-  CHECK(!(sr2.flag() & flag_duplicate));
-  CHECK(result.templates == 2);
-  CHECK(result.templates_marked_duplicate == 0);
-  CHECK(result.alignments == 2);
-  CHECK(result.alignments_marked_duplicate == 0);
+  process_input_stream(test_input, test_output, bf, cli_args, 1);
+  auto outlines { std::istringstream(test_output.str()) };
+  record_flags(outlines, marked_flags);
+
+  for (auto const& [key, val]: expected_flags) {
+    INFO(fmt::format("SamRecordId: {}:{}:{}",
+                     std::get<0>(key), std::get<1>(key), std::get<2>(key)));
+    CHECK(marked_flags[key] == val);
+  }
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleUnmappedPair",
+  "MarkDuplicatesTestQueryNameSorted.testBulkPairsNoDuplicates[0]",
   "[picard tests]"){
-  //TODO
+  std::ifstream test_input, expected_output;
+  SamRecordFlags marked_flags, expected_flags;
+  test_input.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkPairsNoDuplicates[0]/input.sam");
+  expected_output.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkPairsNoDuplicates[0]/output.sam");
+  record_flags(expected_output, expected_flags);
+
+  std::ostringstream test_output;
+  bloomfilter::BloomFilter bf(0.000001, 1000000);
+  std::vector<std::string> cli_args { "dummy", "args" };
+  process_input_stream(test_input, test_output, bf, cli_args, 2);
+  auto outlines { std::istringstream(test_output.str()) };
+  record_flags(outlines, marked_flags);
+
+  for (auto const& [key, val]: expected_flags) {
+    INFO(fmt::format("SamRecordId: {}:{}:{}",
+                     std::get<0>(key), std::get<1>(key), std::get<2>(key)));
+    CHECK(marked_flags[key] == val);
+  }
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleMappedFragment",
+  "MarkDuplicatesTestQueryNameSorted.testBulkPairsWithDuplicates[0]",
   "[picard tests]"){
-  //TODO
+  std::ifstream test_input, expected_output;
+  SamRecordFlags marked_flags, expected_flags;
+  test_input.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkPairsWithDuplicates[0]/input.sam");
+  expected_output.open("resources/picard_tests/MarkDuplicatesTestQueryNameSorted.testBulkPairsWithDuplicates[0]/output.sam");
+  record_flags(expected_output, expected_flags);
+
+  std::ostringstream test_output;
+  bloomfilter::BloomFilter bf(0.000001, 1000000);
+  std::vector<std::string> cli_args { "dummy", "args" };
+  process_input_stream(test_input, test_output, bf, cli_args, 2);
+  auto outlines { std::istringstream(test_output.str()) };
+  record_flags(outlines, marked_flags);
+
+  for (auto const& [key, val]: expected_flags) {
+    INFO(fmt::format("SamRecordId: {}:{}:{}",
+                     std::get<0>(key), std::get<1>(key), std::get<2>(key)));
+    CHECK(marked_flags[key] == val);
+  }
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedFragments",
+  "MarkDuplicatesTestQueryNameSorted.testDifferentChromosomesInOppositeOrder",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleMappedPair",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairAndMatePairFirstOppositeStrandSecondUnmapped",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleMappedFragmentAndSingleMappedPair",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairAndMatePairFirstUnmapped",
   "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
+  INFO("streammd requires both ends of pair to match to call a duplicate");
   REQUIRE(false);
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairs",
-  "[picard tests]"){
-  //TODO
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testThreeMappedPairs",
-  "[picard tests]"){
-  //TODO
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSingleMappedFragmentAndTwoMappedPairs",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairAndMatePairSecondUnmapped",
   "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
+  INFO("streammd requires both ends of pair to match to call a duplicate");
   REQUIRE(false);
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsAndTerminalUnmappedFragment",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsAndTerminalUnmappedPair",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairWithFirstEndSamePositionAndOther",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateFinding",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateClusterSamePositionNoOpticalDuplicates",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateClusterSamePositionNoOpticalDuplicatesWithinPixelDistance",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateClusterSamePositionOneOpticalDuplicatesWithinPixelDistance",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateClusterOneEndSamePositionOneCluster",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testManyOpticalDuplicateClusterOneEndSamePositionOneCluster",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsAndMappedSecondaryFragment",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedFragmentAndMappedPairFirstOfPairNonPrimary",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsMatesSoftClipped",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairWithSamePosition",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithSoftClipping",
+  "MarkDuplicatesTestQueryNameSorted.testMappedPairWithSamePositionSameCigar",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithSoftClippingFirstOfPairOnlyNoMateCigar",
+  "MarkDuplicatesTestQueryNameSorted.testMatePairFirstUnmapped",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithSoftClippingBoth",
+  "MarkDuplicatesTestQueryNameSorted.testMatePairSecondUnmapped",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMatePairSecondUnmapped",
+  "MarkDuplicatesTestQueryNameSorted.testPathologicalOrderingAtTheSamePosition",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMatePairFirstUnmapped",
+  "MarkDuplicatesTestQueryNameSorted.testSecondEndIsBeforeFirstInCoordinate",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedFragmentAndMatePairSecondUnmapped",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedFragmentAndMatePairFirstUnmapped",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairAndMatePairSecondUnmapped",
+  "MarkDuplicatesTestQueryNameSorted.testSingleMappedFragment",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairAndMatePairFirstUnmapped",
+  "MarkDuplicatesTestQueryNameSorted.testSingleMappedPair",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairAndMatePairFirstOppositeStrandSecondUnmapped",
+  "MarkDuplicatesTestQueryNameSorted.testSingleUnmappedFragment",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairAndMappedFragmentAndMatePairSecondUnmapped",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairAndMappedFragmentAndMatePairFirstUnmapped",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd checks either one read or two for all templates, not both.");
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithOppositeOrientations",
+  "MarkDuplicatesTestQueryNameSorted.testSingleUnmappedPair",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithOppositeOrientationsNumberTwo",
+  "MarkDuplicatesTestQueryNameSorted.testThreeGroupsOnDifferentChromosomesOfThreeMappedPairs",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testThreeMappedPairsWithMatchingSecondMate",
+  "MarkDuplicatesTestQueryNameSorted.testThreeMappedPairs",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairWithSamePosition",
+  "MarkDuplicatesTestQueryNameSorted.testThreeMappedPairsWithMatchingSecondMate",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairWithSamePositionSameCigar",
+  "MarkDuplicatesTestQueryNameSorted.testTwoGroupsOnDifferentChromosomesOfThreeMappedPairs",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairWithSamePosition",
+  "MarkDuplicatesTestQueryNameSorted.testTwoGroupsOnDifferentChromosomesOfTwoFragments",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairWithSamePositionDifferentStrands",
+  "MarkDuplicatesTestQueryNameSorted.testTwoGroupsOnDifferentChromosomesOfTwoMappedPairs",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairWithSamePositionDifferentStrands2",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedFragments",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testMappedPairWithFirstEndSamePositionAndOther",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairWithSamePosition",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoGroupsOnDifferentChromosomesOfTwoFragments",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairWithSamePositionDifferentStrands",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoGroupsOnDifferentChromosomesOfTwoMappedPairs",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairWithSamePositionDifferentStrands2",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoGroupsOnDifferentChromosomesOfThreeMappedPairs",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairs",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testThreeGroupsOnDifferentChromosomesOfThreeMappedPairs",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsAndTerminalUnmappedPair",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testBulkFragmentsNoDuplicates",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsMatesSoftClipped",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testBulkPairsNoDuplicates",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithOppositeOrientations",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testBulkFragmentsWithDuplicates",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithOppositeOrientationsNumberTwo",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testBulkPairsWithDuplicates",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSoftClipping",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testStackOverFlowPairSetSwap",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSoftClippingBoth",
   "[picard tests]"){
-  SUCCEED("Not an issue in streammd");
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testSecondEndIsBeforeFirstInCoordinate",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[0]",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testPathologicalOrderingAtTheSamePosition",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[1]",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testDifferentChromosomesInOppositeOrder",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[2]",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateClustersAddingSecondEndFirstSameCoordinate",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testOpticalDuplicateBehaviorNullRegex",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithSupplementaryReads",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[3]",
   "[picard tests]"){
-  // TODO
 }
 
 TEST_CASE(
-  "AbstractMarkDuplicatesCommandLineProgramTest.testTwoMappedPairsWithSupplementaryReadsAfterCanonical",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[4]",
   "[picard tests]"){
-  // TODO
 }
 
 TEST_CASE(
-  "AsIsMarkDuplicatesTest.testSameUnclipped5PrimeOppositeStrand",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReadsAfterCanonical[5]",
   "[picard tests]"){
-  // TODO
 }
 
 TEST_CASE(
-  "AsIsMarkDuplicatesTest.testQueryGroupedInput",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[0]",
   "[picard tests]"){
-  SUCCEED("QNAME grouped input is the only kind that streammd handles anyway");
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.testTwoMappedPairsWithSoftClippingFirstOfPairOnly",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[1]",
   "[picard tests]"){
-  //TODO
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.pgRecordChainingTest",
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[2]",
   "[picard tests]"){
-  SUCCEED("PG record operations are already tested in test_markdups");
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.testOpticalDuplicateDetection",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd cannot distinguish optical dupes from library dupes.")
-  REQUIRE(false);
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[3]",
+  "[picard tests]"){
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.testWithBarcodeFragmentDuplicate",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd currently has no specific handling of barcodes.")
-  REQUIRE(false);
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[4]",
+  "[picard tests]"){
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.testWithBarcodeDuplicate",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd currently has no specific handling of barcodes.")
-  REQUIRE(false);
+  "MarkDuplicatesTestQueryNameSorted.testTwoMappedPairsWithSupplementaryReads[5]",
+  "[picard tests]"){
 }
 
 TEST_CASE(
-  "MarkDuplicatesTest.testWithBarcodeComplex",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd currently has no specific handling of barcodes.")
-  REQUIRE(false);
+  "MarkDuplicatesTestQueryNameSorted.testTwoUnmappedFragments",
+  "[picard tests]"){
 }
 
-TEST_CASE(
-  "MarkDuplicatesTest.testWithIndividualReadBarcodes",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd currently has no specific handling of barcodes.")
-  REQUIRE(false);
-}
-
-TEST_CASE(
-  "MarkDuplicatesTest.testWithUMIs",
-  "[picard tests][!shouldfail]"){
-  INFO("streammd currently has no specific handling of UMIs.")
-  REQUIRE(false);
-}
