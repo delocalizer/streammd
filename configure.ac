@@ -9,7 +9,7 @@ LT_INIT
 AC_CONFIG_AUX_DIR([build-aux])
 
 # Initialize automake
-AM_INIT_AUTOMAKE([subdir-objects serial-tests])
+AM_INIT_AUTOMAKE([subdir-objects serial-tests tar-ustar])
 
 # Check for C++ compiler
 AC_PROG_CXX
