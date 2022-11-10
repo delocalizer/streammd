@@ -4,6 +4,7 @@
 #include <sstream>
 #include "markdups.h"
 #include "version.h"
+#include "test_util.h"
 
 #include <catch2/catch.hpp>
 
@@ -352,23 +353,9 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
    set as the original, where streammd must pick the first.
  */
 TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
-  std::ifstream testinstrm, expectinstrm;
-  testinstrm.open("resources/test.paired_full.sam");
-  expectinstrm.open("resources/test.paired_full.picardmd.sam");
-  std::ostringstream testoutstrm;
-  std::map<
-    std::tuple<std::string, std::string, size_t>,
-    uint16_t> expected_flags, marked_flags;
-  for (SamRecord sr; std::getline(expectinstrm, sr.buffer); ) {
-    if (sr.buffer[0] != '@') {
-      sr.parse();
-      expected_flags[
-        std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
-    }
-  }
-  bloomfilter::BloomFilter bf(0.000001, 1000000);
-  std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(testinstrm, testoutstrm, bf, cli_args, 2);
+  metrics result = test_streammd(
+      "resources/test.paired_full.sam",
+      "resources/test.paired_full.picardmd.sam");
   CHECK(result.templates == 2027);
   CHECK(result.templates_marked_duplicate == 1018); 
   CHECK(result.alignments == 4058);
@@ -376,16 +363,4 @@ TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
   CHECK_THAT(float(result.templates_marked_duplicate)/
              result.templates,
              Catch::Matchers::WithinAbs(0.5022, 0.0001));
-  auto outlines { std::istringstream(testoutstrm.str()) };
-  for (SamRecord sr; std::getline(outlines, sr.buffer); ) {
-    if (sr.buffer[0] != '@') {
-      sr.parse();
-      marked_flags[
-        std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
-    }
-  }
-  // check that all alignments have expected flag
-  for (auto const& [key, val]: expected_flags) {
-    CHECK(marked_flags[key] == val);
-  }
 }
