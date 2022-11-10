@@ -50,7 +50,7 @@ cd streammd-[x.y.z]
 ./configure
 # build
 make
-# run unit tests (optional) — full results in tests/driver.sh.log
+# run unit tests (optional)
 make check
 # install
 sudo make install
