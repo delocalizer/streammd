@@ -110,16 +110,19 @@ void process_qname_group(
         + std::to_string(ends.size()) + " primary alignment(s). " + err);
   }
 
-  std::string ends_str {
+  std::string signature {
     (reads_per_template == 1) 
       ? ends.front()
       : ends.front() + '_' + ends.back() };
 
   if (ends.front() == unmapped) {
     // sort order => if 1st is unmapped all are => do nothing.
-  } else if (!bf.add(ends_str)) {
+  } else if (!bf.add(signature)) {
     // ends already seen => dupe
     n_tpl_dup += 1;
+    // mark all reads in the group as dupes including secondary, supplementary
+    // and unmapped: this is what Picard MD does when operating on QNAME grouped
+    // (but not COORD sorted) records.
     for (auto & read : qname_group) {
       n_aln_dup += 1;
       read.update_dup_status(true);

@@ -1,1 +1,1 @@
-./streammd_tests -s
+./streammd_tests -s -d yes

@@ -4,6 +4,7 @@
 #include <sstream>
 #include "markdups.h"
 #include "version.h"
+#include "test_util.h"
 
 #include <catch2/catch.hpp>
 
@@ -28,28 +29,28 @@ TEST_CASE("markdups::SamRecord.parse", "[SamRecord]") {
 TEST_CASE("markdups::SamRecord.start_pos no soft clip", "[SamRecord]") {
   // this is a fwd read with POS=93578030 and CIGAR=101M
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t99\tchr1\t93578030\t60\t101M\t=\t93578228\t299\tCATCTAATGCTGTTTTGGTTTCTGTGAAATGATATACTCTTGCATTGCTGGTGGCAGTGTAAATTTCTATTTTGGTGGTTTAGCATTTGCATTAAATGCAG\tCCCFFFFFHHHHHJJJJJGIJJJJJIHHIJJJJJJIJJJJJJJJJIJJJJJHIIJGHFHHGIIJJGJIJIJJJEHHEHEHDDEFFFEEEDEEEDDDEEDCC\tNM:i:0\tAS:i:101\tXS:i:25");
-                         // POS
+                       // POS
   CHECK(sr.start_pos() == 93578030);
 }
 
 TEST_CASE("markdups::SamRecord.start_pos with soft clip", "[SamRecord]") {
   // this is a fwd read with POS=725721 and CIGAR=10S32M10I34M15S
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1107:3646:4446\t99\tchr1\t725721\t30\t10S32M10I34M15S\t=\t725895\t275\tGAACACGAAAGGAATACAAGGGAATTTAATGGAATGGACTCTAATGGAATGAAATGGAATGGACTTGAATGGAATATAATGGAAGATATTAGAATGGAATA\tCCCFFFFFHHHHHJJJJJJJJJJJJJJJJJJJIJJJJIIJJJIJIJJIIJIJJJJJJEHHIJIJJJJIGHHHHHFFDEFFFEEEECDDDFEEDDDDDCDD>\tNM:i:12\tAS:i:40\tXS:i:43");
-                         // POS      10S
+                       // POS      10S
   CHECK(sr.start_pos() == 725721 - 10);
 }
 
 TEST_CASE("markdups::SamRecord.end_pos with insertion and no soft clip", "[SamRecord]") {
   // this is a rev read with POS=91356686 and CIGAR=28M2I71M
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1114:14456:12207\t83\tchr1\t91356686\t60\t28M2I71M\t=\t91356467\t-318\tCTCGTATCATTTTGAACTTTGCTTTTCATTTTTTTTTTTTTAATTTATTGATTGATTGATTTATTGATCATTCTTGGGTGTTTCTCGCAGAGGGGGATTTG\t#@<A@ACCCCCDA:CCC?C?2CCCA>>DBDDD@BDFEEIIJJIJJJJJIJIIJJJIJJJJJJJJJIHGJJJJIJJJJIJJJJIIHIIIHHHHHFFFFFCCB\tNM:i:2\tAS:i:91\tXS:i:53");
-                       // POS        28M  2I  71M 
+                     // POS        28M  2I  71M 
   CHECK(sr.end_pos() == 91356686 + 28 + 0 + 71 );
 }
 
 TEST_CASE("markdups::SamRecord.end_pos with soft clip", "[SamRecord]") {
   // this is a rev read with POS=725895 and CIGAR=40M10D51M10S
   SamRecord sr("HWI-ST1213:151:C1DTBACXX:2:1107:3646:4446\t147\tchr1\t725895\t30\t40M10D51M10S\t=\t725721\t-275\tTGGAATGGACTCGAATGGAATGGTATGGAATGGACTCGAATGCAATGGAATGTACTCAAATGGAATGCTATGGAATTGACTCGAGTGGAATGGAATAGAAT\t;FFFFEEHFHHIIJJIJIJJIIIJIJJJJJIJJIJJIJJJJJJJJJIGIGGIGDJJGJJJIJJJJJJJJJJJJJJJJJHJJJJJJJJJHHHHHFFFFFCCC\tNM:i:17\tAS:i:40\tXS:i:35");
-                       // POS      40M  10D  51M  10S
+                     // POS      40M  10D  51M  10S
   CHECK(sr.end_pos() == 725895 + 40 + 10 + 51 + 10);
 }
 
@@ -352,23 +353,9 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
    set as the original, where streammd must pick the first.
  */
 TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
-  std::ifstream testinstrm, expectinstrm;
-  testinstrm.open("resources/test.paired_full.sam");
-  expectinstrm.open("resources/test.paired_full.picardmd.sam");
-  std::ostringstream testoutstrm;
-  std::map<
-    std::tuple<std::string, std::string, size_t>,
-    uint16_t> expected_flags, marked_flags;
-  for (SamRecord sr; std::getline(expectinstrm, sr.buffer); ) {
-    if (sr.buffer[0] != '@') {
-      sr.parse();
-      expected_flags[
-        std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
-    }
-  }
-  bloomfilter::BloomFilter bf(0.000001, 1000000);
-  std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(testinstrm, testoutstrm, bf, cli_args, 2);
+  metrics result = test_streammd(
+      "resources/test.paired_full.sam",
+      "resources/test.paired_full.picardmd.sam");
   CHECK(result.templates == 2027);
   CHECK(result.templates_marked_duplicate == 1018); 
   CHECK(result.alignments == 4058);
@@ -376,16 +363,4 @@ TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
   CHECK_THAT(float(result.templates_marked_duplicate)/
              result.templates,
              Catch::Matchers::WithinAbs(0.5022, 0.0001));
-  auto outlines { std::istringstream(testoutstrm.str()) };
-  for (SamRecord sr; std::getline(outlines, sr.buffer); ) {
-    if (sr.buffer[0] != '@') {
-      sr.parse();
-      marked_flags[
-        std::make_tuple(sr.qname(), sr.rname(), sr.pos())] = sr.flag();
-    }
-  }
-  // check that all alignments have expected flag
-  for (auto const& [key, val]: expected_flags) {
-    CHECK(marked_flags[key] == val);
-  }
 }

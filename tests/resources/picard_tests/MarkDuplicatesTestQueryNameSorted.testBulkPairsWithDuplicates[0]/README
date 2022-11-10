@@ -1,0 +1,12 @@
+qname grouped templates required grouping by output duplicate FLAG so that
+non-duplicates appear before duplicates because streammd accepts the first
+occurring as the "original" and all subsequent ones as dupes:
+cat <(samtools view -H  original.output.sam) \
+    <(samtools view -F 1024 original.output.sam) \
+    <(samtools view -f 1024 original.output.sam) |\
+    samtools view -h --remove-flags 1024 \
+> input.sam
+cat <(samtools view -H  original.output.sam) \
+    <(samtools view -F 1024 original.output.sam) \
+    <(samtools view -f 1024 original.output.sam) \
+> output.sam
