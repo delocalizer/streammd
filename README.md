@@ -107,10 +107,10 @@ Optional arguments:
                                 previously been through a duplicate marking step. [default: false]
 ```
 
-1. mark duplicates on an input SAM file record stream 
+1. mark duplicates on an input SAM record stream 
 
 ```bash
-samtools view -h some.bam|streammd
+bwa mem ref.fa r1.fq r2.fq|streammd
 ```
 
 ## Notes
