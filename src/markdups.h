@@ -31,7 +31,7 @@ const std::string pgtagval { _pgtag + pgid };
 const std::string unmapped { DEL };
 
 struct metrics {
-  uint64_t templates, templates_marked_duplicate,
+  uint64_t templates, templates_unmapped, templates_marked_duplicate,
            alignments, alignments_marked_duplicate;
 };
 
@@ -205,6 +205,7 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    uint64_t& n_tpl_unmap,
     uint64_t& n_tpl_dup,
     uint64_t& n_aln_dup,
     size_t reads_per_template = 2,

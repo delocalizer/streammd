@@ -28,6 +28,8 @@ Due to the nature of the single-pass operation:
 * `streammd` does not differentiate between optical duplicates and PCR
   duplicates.
 
+Additionally, the current implementation handles SAM format input only.
+
 ## Requirements
 
 ### Development
@@ -135,16 +137,23 @@ For example, as a guide: 60x human WGS 2x150bp paired-end sequencing consists
 of n &#8776; 6.00E+08 templates, and the default memory setting of 4GiB is
 sufficient to process this at the default false positive rate of 1.00E-06.
 
+### Metrics
+
+* `TEMPLATES` = total count of templates seen.
+* `TEMPLATES_UNMAPPED` = count of templates containing no mapped read.
+* `TEMPLATES_MARKED_DUPLICATE` = count of templates marked duplicate.
+* `TEMPLATE_DUPLICATE_FRACTION` = `TEMPLATES_MARKED_DUPLICATE / (TEMPLATES - TEMPLATES_UNMAPPED)`
+
 ### Pipelining
 
 `streammd` is capable of generating outputs at a very high rate. For efficient
 pipelining, downstream tools should be run with sufficient cpu resources to
 handle their inputs — for example if you want to write the outputs to BAM
 format using `samtools view` you should specify extra compression threads for
-optimal throughput:
+optimal throughput; for example:
 
 ```bash
-samtools view -h some.bam|streammd|samtools view -@2 -o some.MD.bam
+bwa mem ref.fa r1.fq r2.fq|streammd|samtools view -@2 -o some.MD.bam
 ```
 ### Citing
 
