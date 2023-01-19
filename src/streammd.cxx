@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
     .metavar("OUTPUT");
 
   cli.add_argument("-p", "--fp-rate")
-    .help("Target maximum false positive rate.")
+    .help("The maximum acceptable marginal false-positive rate.")
     .default_value(double(0.000001))
     .metavar("FP_RATE")
     .scan<'g', double>();
