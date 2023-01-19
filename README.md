@@ -89,7 +89,7 @@ Optional arguments:
   -v, --version         	prints version information and exits 
   --input INPUT         	Input file. [default: STDIN] 
   --output OUTPUT       	Output file. [default: STDOUT] 
-  -p, --fp-rate FP_RATE 	Target maximum false positive rate. [default: 1e-06]
+  -p, --fp-rate FP_RATE 	The maximum acceptable marginal false-positive rate. [default: 1e-06]
   -m, --mem MEM         	Memory allowance for the Bloom filter, e.g "4GiB". Both binary
                                 (kiB|MiB|GiB) and decimal (kB|MB|GB) formats are understood. As a
                                 result of implementation details, a value that is an exact power
