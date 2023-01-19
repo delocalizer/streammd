@@ -137,6 +137,19 @@ For example, as a guide: 60x human WGS 2x150bp paired-end sequencing consists
 of n &#8776; 6.00E+08 templates, and the default memory setting of 4GiB is
 sufficient to process this at the default false positive rate of 1.00E-06.
 
+### False-positive rate.
+
+`-p, --fp-rate` sets the value for the *maximum acceptable marginal
+false-positive rate*. This is the value at which the tool raises an error when
+with `n` items already stored, the predicted FP probability of a newly tested
+item exceeds that value. This is not the same as the true bulk FP rate in all
+items processed by the Bloom filter, which will always be lower as long as we
+stop adding items when the marginal rate is exceeded.
+
+The `--allow-overcapacity` option overrides this default error behaviour,
+generating only a warning when the target maximum marginal FP rate is exceeded.
+This is not recommended for general use.
+
 ### Metrics
 
 * `TEMPLATES` = total count of templates seen.
