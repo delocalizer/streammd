@@ -150,6 +150,31 @@ The `--allow-overcapacity` option overrides this default error behaviour,
 generating only a warning when the target maximum marginal FP rate is exceeded.
 This is not recommended for general use.
 
+### Hash functions.
+
+The current implementation of `streammd` uses a fixed number of hash functions
+(`k=10`) regardless of the value of `p` (`--fp-rate`) or `m` (`--mem`). Other
+implementations are certainly possible, such as allowing a free choice of `k`,
+or using the value of `k` that maximizes capacity `n` for a given `m` and `p`
+(i.e. the capacity-optimal value). Each of these has its own drawbacks. In the
+case of a free choice, the user must understand and experiment with the
+non-trivial relationship between `k` and filter capacity, false-positive rate,
+memory use, and performance to pick a sensible value. Most users probably just 
+want reasonable performance and minimal parameter space searching, given their
+computational constraint (mem) and analytic goal (FPR).
+
+Moreover, the value of `k` that maximizes `n` for a given `p` and `m` is not
+a great default for performance reasons because Bloom filter capacity is only
+weakly dependent on `k` close to the capacity-optimal value, but computational
+cost is linear in `k`. For example, with defaults of `m=4GiB` and `p=1e-6`,
+the capacity-optimal Bloom filter requires `k=20` to store `1.2e9` items, but
+halving the number of hashes to `k=10` (doubling the speed) reduces capacity by
+just 17% to `1e9` items.
+
+In summary, a fixed `k=10` is a pragmatic compromise between performance and
+memory given values of `p` and `n` likely to be useful for large short-read
+datasets.
+
 ### Metrics
 
 * `TEMPLATES` = total count of templates seen.
