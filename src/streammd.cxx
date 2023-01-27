@@ -136,18 +136,23 @@ int main(int argc, char* argv[]) {
         cli.get<bool>("--strip-previous"),
         cli.get<bool>("--remove-duplicates")
     );
-    auto cap { float(result.templates - result.templates_marked_duplicate)/bf.n() };
+    auto nadded { result.templates
+                  - result.templates_unmapped
+                  - result.templates_marked_duplicate };
+    auto cap { float(nadded)/bf.n() };
+    auto marginal_fp { pow(1 - exp(-double(bf.k())*nadded/bf.m()), bf.k()) }; 
     if (cap <= 1.0) {
       spdlog::info("BloomFilter at {:.3g}% capacity", 100*cap);
+      spdlog::info("Estimated marginal false positive rate: {:.2e}", marginal_fp);
       write_metrics(metricsfname, result);
     } else if (cli.get<bool>("--allow-overcapacity")) {
       write_metrics(metricsfname, result);
       spdlog::warn("{} items leaves BloomFilter at {:.3g}% capacity.",
-                   result.templates, 100*cap);
+                   nadded, 100*cap);
       spdlog::warn("False positive rate {} exceeded.", bf.p());
     } else {
       spdlog::error("{} items leaves BloomFilter at {:.3g}% capacity.",
-                    result.templates, 100*cap);
+                    nadded, 100*cap);
       throw std::runtime_error("BloomFilter capacity exceeded.");
     }
   } catch(const std::exception& err) {
