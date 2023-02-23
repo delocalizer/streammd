@@ -28,6 +28,8 @@ Due to the nature of the single-pass operation:
 * `streammd` does not differentiate between optical duplicates and PCR
   duplicates.
 
+Additionally, the current implementation handles SAM format input only.
+
 ## Requirements
 
 ### Development
@@ -87,7 +89,7 @@ Optional arguments:
   -v, --version         	prints version information and exits 
   --input INPUT         	Input file. [default: STDIN] 
   --output OUTPUT       	Output file. [default: STDOUT] 
-  -p, --fp-rate FP_RATE 	Target maximum false positive rate. [default: 1e-06]
+  -p, --fp-rate FP_RATE 	The maximum acceptable marginal false-positive rate. [default: 1e-06]
   -m, --mem MEM         	Memory allowance for the Bloom filter, e.g "4GiB". Both binary
                                 (kiB|MiB|GiB) and decimal (kB|MB|GB) formats are understood. As a
                                 result of implementation details, a value that is an exact power
@@ -105,10 +107,10 @@ Optional arguments:
                                 previously been through a duplicate marking step. [default: false]
 ```
 
-1. mark duplicates on an input SAM file record stream 
+1. mark duplicates on an input SAM record stream 
 
 ```bash
-samtools view -h some.bam|streammd
+bwa mem ref.fa r1.fq r2.fq|streammd
 ```
 
 ## Notes
@@ -135,16 +137,61 @@ For example, as a guide: 60x human WGS 2x150bp paired-end sequencing consists
 of n &#8776; 6.00E+08 templates, and the default memory setting of 4GiB is
 sufficient to process this at the default false positive rate of 1.00E-06.
 
+### False-positive rate.
+
+`-p, --fp-rate` sets the value for the *maximum acceptable marginal
+false-positive rate*. This is the value at which the tool raises an error when
+with `n` items already stored, the predicted FP probability of a newly tested
+item exceeds that value. This is not the same as the true bulk FP rate in all
+items processed by the Bloom filter, which will always be lower as long as we
+stop adding items when the marginal rate is exceeded.
+
+The `--allow-overcapacity` option overrides this default error behaviour,
+generating only a warning when the target maximum marginal FP rate is exceeded.
+This is not recommended for general use.
+
+### Hash functions.
+
+The current implementation of `streammd` uses a fixed number of hash functions
+(`k=10`) regardless of the value of `p` (`--fp-rate`) or `m` (`--mem`). Other
+implementations are certainly possible, such as allowing a free choice of `k`,
+or using the value of `k` that maximizes capacity `n` for a given `m` and `p`
+(i.e. the capacity-optimal value). Each of these has its own drawbacks. In the
+case of a free choice, the user must understand and experiment with the
+non-trivial relationship between `k` and filter capacity, false-positive rate,
+memory use, and performance to pick a sensible value. Most users probably just 
+want reasonable performance and minimal parameter space searching, given their
+computational constraint (mem) and analytic goal (FPR).
+
+Moreover, the value of `k` that maximizes `n` for a given `p` and `m` is not
+a great default for performance reasons because Bloom filter capacity is only
+weakly dependent on `k` close to the capacity-optimal value, but computational
+cost is linear in `k`. For example, with defaults of `m=4GiB` and `p=1e-6`,
+the capacity-optimal Bloom filter requires `k=20` to store `1.2e9` items, but
+halving the number of hashes to `k=10` (doubling the speed) reduces capacity by
+just 17% to `1e9` items.
+
+In summary, a fixed `k=10` is a pragmatic compromise between performance and
+memory given values of `p` and `n` likely to be useful for large short-read
+datasets.
+
+### Metrics
+
+* `TEMPLATES` = total count of templates seen.
+* `TEMPLATES_UNMAPPED` = count of templates containing no mapped read.
+* `TEMPLATES_MARKED_DUPLICATE` = count of templates marked duplicate.
+* `TEMPLATE_DUPLICATE_FRACTION` = `TEMPLATES_MARKED_DUPLICATE / (TEMPLATES - TEMPLATES_UNMAPPED)`
+
 ### Pipelining
 
 `streammd` is capable of generating outputs at a very high rate. For efficient
 pipelining, downstream tools should be run with sufficient cpu resources to
 handle their inputs — for example if you want to write the outputs to BAM
 format using `samtools view` you should specify extra compression threads for
-optimal throughput:
+optimal throughput; for example:
 
 ```bash
-samtools view -h some.bam|streammd|samtools view -@2 -o some.MD.bam
+bwa mem ref.fa r1.fq r2.fq|streammd|samtools view -@2 -o some.MD.bam
 ```
 ### Citing
 

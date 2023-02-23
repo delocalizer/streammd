@@ -19,7 +19,7 @@ metrics process_input_stream(
     bool remove_duplicates) {
 
   bool header_done { false };
-  uint64_t n_tpl { 0 }, n_aln {0}, n_tpl_dup {0}, n_aln_dup {0};
+  uint64_t n_tpl { 0 }, n_tpl_unmap {0}, n_tpl_dup {0}, n_aln {0}, n_aln_dup {0};
   std::string header_prev { "" };
   std::string qname;
   std::string qname_prev { "" };
@@ -44,8 +44,8 @@ metrics process_input_stream(
           spdlog::debug("qnames seen: {0}", n_tpl);
         }
         if (qname_group.size()) {
-          process_qname_group(qname_group, out, bf, n_tpl_dup, n_aln_dup,
-              reads_per_template, strip_previous, remove_duplicates);
+          process_qname_group(qname_group, out, bf, n_tpl_unmap, n_tpl_dup,
+	      n_aln_dup, reads_per_template, strip_previous, remove_duplicates);
           qname_group.clear();
         }
         qname_prev = samrecord.qname();
@@ -54,9 +54,9 @@ metrics process_input_stream(
     }
   }
   // handle the last group
-  process_qname_group(qname_group, out, bf, n_tpl_dup, n_aln_dup,
+  process_qname_group(qname_group, out, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup,
       reads_per_template, strip_previous, remove_duplicates);
-  return metrics { n_tpl, n_tpl_dup, n_aln, n_aln_dup };
+  return metrics { n_tpl, n_tpl_unmap, n_tpl_dup, n_aln, n_aln_dup };
 }
 
 // Write @PG line to the output stream; to be called after all existing header
@@ -92,6 +92,7 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
+    uint64_t& n_tpl_unmap,
     uint64_t& n_tpl_dup,
     uint64_t& n_aln_dup,
     size_t reads_per_template,
@@ -116,7 +117,8 @@ void process_qname_group(
       : ends.front() + '_' + ends.back() };
 
   if (ends.front() == unmapped) {
-    // sort order => if 1st is unmapped all are => do nothing.
+    // sort order => if 1st is unmapped all are. 
+    n_tpl_unmap += 1;
   } else if (!bf.add(signature)) {
     // ends already seen => dupe
     n_tpl_dup += 1;
@@ -195,10 +197,13 @@ std::deque<std::string> template_ends(
 // Log and write metrics to file as JSON.
 void write_metrics(std::string metricsfname, metrics metrics) {
 
-  float dup_frac {float(metrics.templates_marked_duplicate)/metrics.templates}; 
+  float dup_frac {
+      float(metrics.templates_marked_duplicate)/
+	      (metrics.templates - metrics.templates_unmapped)}; 
   spdlog::info("alignments seen: {}", metrics.alignments);
   spdlog::info("alignments marked duplicate: {}", metrics.alignments_marked_duplicate);
   spdlog::info("templates seen: {}", metrics.templates);
+  spdlog::info("templates unmapped: {}", metrics.templates_unmapped);
   spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
   spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
 
@@ -212,12 +217,14 @@ void write_metrics(std::string metricsfname, metrics metrics) {
       "\"ALIGNMENTS\":{},"
       "\"ALIGNMENTS_MARKED_DUPLICATE\":{},"
       "\"TEMPLATES\":{},"
+      "\"TEMPLATES_UNMAPPED\":{},"
       "\"TEMPLATES_MARKED_DUPLICATE\":{},"
       "\"TEMPLATE_DUPLICATE_FRACTION\":{:.4f}"
     "}}", 
     metrics.alignments,
     metrics.alignments_marked_duplicate,
     metrics.templates,
+    metrics.templates_unmapped,
     metrics.templates_marked_duplicate,
     dup_frac);
 }
