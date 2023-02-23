@@ -188,6 +188,20 @@ TEST_CASE("markdups::template_ends paired FR RF", "[template_ends]"){
   CHECK(ends1 == ends2);
 }
 
+TEST_CASE("markdups::template_ends paired FR RF one unmapped", "[template_ends]"){
+  // Confirm that calculated ends of a duplicate pair in opposite orientation
+  // and one end unmapped, are the same .
+  SamRecord pair1_r1("frag1\t73\tchr1\t1000\t0\t10M\t=\t1000\t0\tAAAAAAAAAA\tJJJJJJJJJJ");
+  SamRecord pair1_r2("frag1\t133\tchr1\t1000\t0\t*\t=\t1000\t0\tTTTTTTTTTT\tJJJJJJJJJJ");
+  SamRecord pair2_r1("frag2\t69\tchr1\t1000\t0\t*\t=\t1000\t0\tTTTTTTTTTT\tJJJJJJJJJJ");
+  SamRecord pair2_r2("frag2\t137\tchr1\t1000\t0\t10M\t=\t1000\t0\tAAAAAAAAAA\tJJJJJJJJJJ");
+  std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
+  auto ends1 { ends_str(template_ends(qn1), 2) },
+       ends2 { ends_str(template_ends(qn2), 2) };
+  CHECK(ends1 == "chr1F1000_" + unmapped);
+  CHECK(ends1 == ends2);
+}
+
 TEST_CASE("markdups::template_ends pairs with soft-clipping", "[template_ends]"){
   // Confirm that soft clipping at fwd and reverse ends of reads in a duplicate
   // pair is accounted for
