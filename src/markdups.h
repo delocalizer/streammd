@@ -43,10 +43,10 @@ class SamRecord {
   SamRecord(): buffer() { buffer.reserve(1024); }
   SamRecord(std::string line): buffer(line) { this->parse(); }
   std::string buffer;
-  inline const std::string& qname() { return qname_; };
-  inline const uint16_t& flag() { return flag_; };
-  inline const std::string& rname() { return rname_; };
-  inline const int32_t& pos() { return pos_; };
+  inline const std::string& qname() const { return qname_; };
+  inline const uint16_t& flag() const { return flag_; };
+  inline const std::string& rname() const { return rname_; };
+  inline const int32_t& pos() const { return pos_; };
 
   // Construct what we need and no more.
   inline void parse() {
@@ -99,7 +99,7 @@ class SamRecord {
   }
 
   // Return reference start of a fwd read (pos - leading soft clips)
-  inline int32_t start_pos(){
+  inline int32_t start_pos() const {
     int num { 0 };
     char ch { '\0' }, op { '\0' };
     for (size_t i=cigaridx_; i < cigaridx_ + cigarlen_; ++i) {
@@ -115,7 +115,7 @@ class SamRecord {
   }
 
   // Return reference end of a rev read (pos + reflen + trailing soft clips)
-  inline int32_t end_pos(){
+  inline int32_t end_pos() const {
     int num { 0 }, prev { 0 }, reflen { 0 };
     char ch { '\0' }, op { '\0' };
     for (size_t i=cigaridx_; i < cigaridx_ + cigarlen_; ++i) {

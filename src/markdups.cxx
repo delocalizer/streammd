@@ -138,7 +138,7 @@ void process_qname_group(
     }
   }
   // write to output
-  for (auto record : qname_group) {
+  for (auto & record : qname_group) {
     out << record.buffer;
   }
 }
@@ -148,19 +148,27 @@ void process_qname_group(
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group) {
 
-  // End strings are constructed like: "{rname}{F|R}{pos}" with the F|R between
+  // End strings are constructed like: "{rname}_{pos}" with the _ between
   // because rname can end in a digit and we need string values that distinguish
   // between ("chr1", 1234) and ("chr11", 234).
   std::deque<std::string> ends;
   std::string rname, rname_prev { unmapped };
   int32_t pos, pos_prev { posmax };
-  char orient;
+  bool all_mapped { true };
 
   // Profiling shows most of the time we're doing bitarray ops (not hashing,
   // which seems surprising) but if there's more performance to be had elsewhere 
   // this is where to find it — we're not particularly clever about how we make
   // the template ends signature.
-  for (auto read : qname_group) {
+
+  // check if any reads are unmapped
+  for (auto & read : qname_group) {
+    if (read.flag() & flag_unmapped){
+      all_mapped = false;
+      break;
+    }
+  }
+  for (auto & read : qname_group) {
     // use only primary alignments for end calculation
     if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
       continue;
@@ -171,11 +179,12 @@ std::deque<std::string> template_ends(
       pos_prev = posmax;
     } else {
       rname = read.rname();
-      if (read.flag() & flag_reverse){
-        orient = 'R';
+      // if one read is unmapped, always use start_pos for the mapped end —
+      // this produces SAMBLASTER >= v0.1.25 behaviour where fwd and rev
+      // orphans are allowed to be duplicates of each other.
+      if (read.flag() & flag_reverse && all_mapped){
         pos = read.end_pos();
       } else {
-        orient = 'F';
         pos = read.start_pos();
       }
       if ((rname > rname_prev) ||
@@ -183,9 +192,9 @@ std::deque<std::string> template_ends(
         // This suggests fmt is faster than std::to_string:
         // https://www.zverovich.net/2013/09/07/integer-to-string-conversion-in-cplusplus.html
         // and that's borne out by gprof
-        ends.emplace_back(rname + orient + fmt::format_int(pos).c_str());
+        ends.emplace_back(rname + '_' + fmt::format_int(pos).c_str());
       } else {
-        ends.emplace_front(rname + orient + fmt::format_int(pos).c_str());
+        ends.emplace_front(rname + '_' + fmt::format_int(pos).c_str());
       }
       rname_prev = rname;
       pos_prev = pos;
