@@ -151,36 +151,37 @@ std::deque<std::string> template_ends(
   // End strings are constructed like: "{rname}_{pos}" with the _ between
   // because rname can end in a digit and we need string values that distinguish
   // between ("chr1", 1234) and ("chr11", 234).
-  std::deque<SamRecord> primaries;
   std::deque<std::string> ends;
   std::string rname, rname_prev { unmapped };
   int32_t pos, pos_prev { posmax };
   bool one_unmapped { false };
 
-  // use only primary alignments for end calculation
-  for (auto read : qname_group) {
-    if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
-      continue;
-    // unmapped to back
-    } else if (read.flag() & flag_unmapped){
-      primaries.emplace_back(read);
-      one_unmapped = true;
-    } else {
-      primaries.emplace_front(read);
-    }
-  }
   // Profiling shows most of the time we're doing bitarray ops (not hashing,
   // which seems surprising) but if there's more performance to be had elsewhere 
   // this is where to find it — we're not particularly clever about how we make
   // the template ends signature.
-  for (auto read : primaries) {
+
+  // check if any reads are unmapped
+  for (auto read : qname_group) {
     if (read.flag() & flag_unmapped){
+      one_unmapped = true;
+      break;
+    }
+  }
+  for (auto read : qname_group) {
+    // use only primary alignments for end calculation
+    if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
+      continue;
+    // unmapped
+    } else if (read.flag() & flag_unmapped){
       ends.emplace_back(unmapped);
+      rname_prev = unmapped;
+      pos_prev = posmax;
     } else {
       rname = read.rname();
-      // if one read is unmapped, always use the start_pos for the mapped end —
-      // this produces SAMBLASTER behaviour where fwd and rev orphans are
-      // allowed to be duplicates of each other.
+      // if one read is unmapped, always use start_pos for the mapped end —
+      // this produces SAMBLASTER >= v0.1.25 behaviour where fwd and rev
+      // orphans are allowed to be duplicates of each other.
       if (read.flag() & flag_reverse && ! one_unmapped){
         pos = read.end_pos();
       } else {
