@@ -114,7 +114,7 @@ TEST_CASE("markdups::template_ends pair", "[template_ends]"){
   SamRecord pair1_r2("HWI-ST1213:151:C1DTBACXX:2:1101:2189:99680\t147\tchr1\t93578228\t60\t101M\t=\t93578030\t-299\tAACAACAACAAAAAATTTGGTATTTCTAAGATGAAATGGCCAAGGCTTTCTAGTCAATTGGATTTAGAGTAAAGGAGACTATAGAAGATTACTAAGCTATA\tBDDDDDDEDDFHHHHHHJIJIJJJJJIJJJIJJJJJJJJJIIJJIJJJIIIJJIJJJJJIJJJJIJJJJJJJJJJJJJJJIJJJJJJJHHHHHFFFFFCCB\tNM:i:0\tAS:i:101\tXS:i:21");
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) };
-  CHECK(ends1 == "chr1F93578030_chr1R93578329");
+  CHECK(ends1 == "chr1_93578030_chr1_93578329");
 }
 
 TEST_CASE("markdups::template_ends pair with one end unmapped", "[template_ends]"){
@@ -124,7 +124,7 @@ TEST_CASE("markdups::template_ends pair with one end unmapped", "[template_ends]
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) };
   // First read is unmapped but 'unmapped' sorts to last
-  CHECK(ends1 == "chr1F66212_" + unmapped);
+  CHECK(ends1 == "chr1_66212_" + unmapped);
 }
 
 TEST_CASE("markdups::template_ends pair with both ends unmapped", "[template_ends]"){
@@ -144,7 +144,7 @@ TEST_CASE("markdups::template_ends single FF", "[template_ends]"){
   std::vector<SamRecord> qn1 { sr1 }, qn2 { sr2 };
   auto ends1 { ends_str(template_ends(qn1), 1) },
        ends2 { ends_str(template_ends(qn2), 1) };
-  CHECK(ends1 == "chr1F4498454");
+  CHECK(ends1 == "chr1_4498454");
   CHECK(ends1 == ends2);
 }
 
@@ -156,7 +156,7 @@ TEST_CASE("markdups::template_ends single FR", "[template_ends]"){
   std::vector<SamRecord> qn1 { sr1 }, qn2 { sr2 };
   auto ends1 { ends_str(template_ends(qn1), 1) },
        ends2 { ends_str(template_ends(qn2), 1) };
-  CHECK(ends1 == "chr1F4498454");
+  CHECK(ends1 == "chr1_4498454");
   CHECK(ends1 != ends2);
 }
 
@@ -170,7 +170,7 @@ TEST_CASE("markdups::template_ends paired FR FR", "[template_ends]"){
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  CHECK(ends1 == "chr1F13583_chr1R13860");
+  CHECK(ends1 == "chr1_13583_chr1_13860");
   CHECK(ends1 == ends2);
 }
 
@@ -184,7 +184,7 @@ TEST_CASE("markdups::template_ends paired FR RF", "[template_ends]"){
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  CHECK(ends1 == "chr1F564691_chr1R564988");
+  CHECK(ends1 == "chr1_564691_chr1_564988");
   CHECK(ends1 == ends2);
 }
 
@@ -198,7 +198,7 @@ TEST_CASE("markdups::template_ends paired FR RF one unmapped", "[template_ends]"
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  CHECK(ends1 == "chr1F1000_" + unmapped);
+  CHECK(ends1 == "chr1_1000_" + unmapped);
   CHECK(ends1 == ends2);
 }
 
@@ -212,7 +212,7 @@ TEST_CASE("markdups::template_ends pairs with soft-clipping", "[template_ends]")
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 }, qn2 { pair2_r1, pair2_r2 };
   auto ends1 { ends_str(template_ends(qn1), 2) },
        ends2 { ends_str(template_ends(qn2), 2) };
-  CHECK(ends1 == "chr1F725711_chr1R726006");
+  CHECK(ends1 == "chr1_725711_chr1_726006");
   CHECK(ends1 == ends2);
 }
 

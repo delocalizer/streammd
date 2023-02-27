@@ -148,13 +148,12 @@ void process_qname_group(
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group) {
 
-  // End strings are constructed like: "{rname}{F|R}{pos}" with the F|R between
+  // End strings are constructed like: "{rname}_{pos}" with the _ between
   // because rname can end in a digit and we need string values that distinguish
   // between ("chr1", 1234) and ("chr11", 234).
   std::deque<std::string> ends;
   std::string rname, rname_prev { unmapped };
   int32_t pos, pos_prev { posmax };
-  char orient;
 
   // Profiling shows most of the time we're doing bitarray ops (not hashing,
   // which seems surprising) but if there's more performance to be had elsewhere 
@@ -172,10 +171,8 @@ std::deque<std::string> template_ends(
     } else {
       rname = read.rname();
       if (read.flag() & flag_reverse){
-        orient = 'R';
         pos = read.end_pos();
       } else {
-        orient = 'F';
         pos = read.start_pos();
       }
       if ((rname > rname_prev) ||
@@ -183,9 +180,9 @@ std::deque<std::string> template_ends(
         // This suggests fmt is faster than std::to_string:
         // https://www.zverovich.net/2013/09/07/integer-to-string-conversion-in-cplusplus.html
         // and that's borne out by gprof
-        ends.emplace_back(rname + orient + fmt::format_int(pos).c_str());
+        ends.emplace_back(rname + '_' + fmt::format_int(pos).c_str());
       } else {
-        ends.emplace_front(rname + orient + fmt::format_int(pos).c_str());
+        ends.emplace_front(rname + '_' + fmt::format_int(pos).c_str());
       }
       rname_prev = rname;
       pos_prev = pos;
