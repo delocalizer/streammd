@@ -138,7 +138,7 @@ void process_qname_group(
     }
   }
   // write to output
-  for (auto record : qname_group) {
+  for (auto & record : qname_group) {
     out << record.buffer;
   }
 }
@@ -154,7 +154,7 @@ std::deque<std::string> template_ends(
   std::deque<std::string> ends;
   std::string rname, rname_prev { unmapped };
   int32_t pos, pos_prev { posmax };
-  bool one_unmapped { false };
+  bool all_mapped { true };
 
   // Profiling shows most of the time we're doing bitarray ops (not hashing,
   // which seems surprising) but if there's more performance to be had elsewhere 
@@ -162,13 +162,13 @@ std::deque<std::string> template_ends(
   // the template ends signature.
 
   // check if any reads are unmapped
-  for (auto read : qname_group) {
+  for (auto & read : qname_group) {
     if (read.flag() & flag_unmapped){
-      one_unmapped = true;
+      all_mapped = false;
       break;
     }
   }
-  for (auto read : qname_group) {
+  for (auto & read : qname_group) {
     // use only primary alignments for end calculation
     if ((read.flag() & flag_secondary) || (read.flag() & flag_supplementary)){
       continue;
@@ -182,7 +182,7 @@ std::deque<std::string> template_ends(
       // if one read is unmapped, always use start_pos for the mapped end —
       // this produces SAMBLASTER >= v0.1.25 behaviour where fwd and rev
       // orphans are allowed to be duplicates of each other.
-      if (read.flag() & flag_reverse && ! one_unmapped){
+      if (read.flag() & flag_reverse && all_mapped){
         pos = read.end_pos();
       } else {
         pos = read.start_pos();
