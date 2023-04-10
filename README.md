@@ -195,10 +195,4 @@ bwa mem ref.fa r1.fq r2.fq|streammd|samtools view -@2 -o some.MD.bam
 ```
 ### Citing
 
-Please cite https://doi.org/10.1101/2022.10.12.511997 when referring to `streammd` in publications.
-
-```
-streammd: fast low-memory duplicate marking using a Bloom filter
-Conrad R Leonard
-bioRxiv 2022.10.12.511997; doi: https://doi.org/10.1101/2022.10.12.511997
-```
+Please cite https://doi.org/10.1093/bioinformatics/btad181 when referring to `streammd` in publications.
