@@ -253,10 +253,14 @@ TEST_CASE("markdups::process_qname_group not single", "[process_qname_group]"){
   std::vector<SamRecord> qn1 { pair1_r1, pair1_r2 };
   std::stringstream os;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  uint64_t n_tpl_unmap {0}, n_tpl_dup {0}, n_aln_dup {0};
-  size_t reads_per_template = 1;
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=1,
+    .cli_args={ "dummy" } };
+  counts tally { 0, 0, 0, 0, 0 };
   CHECK_THROWS_WITH(
-      process_qname_group(qn1, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, reads_per_template),
+      process_qname_group(qn1, os, bf, conf, tally),
       Catch::Matchers::Contains("Input is not single reads?"));
 }
 
@@ -267,10 +271,14 @@ TEST_CASE("markdups::process_qname_group not paired", "[process_qname_group]"){
   std::vector<SamRecord> qn1 { sr1 };
   std::stringstream os;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  uint64_t n_tpl_unmap {0}, n_tpl_dup {0}, n_aln_dup {0};
-  size_t reads_per_template = 2;
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=2,
+    .cli_args={ "dummy" } };
+  counts tally { 0, 0, 0, 0, 0 };
   CHECK_THROWS_WITH(
-      process_qname_group(qn1, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, reads_per_template),
+      process_qname_group(qn1, os, bf, conf, tally),
       Catch::Matchers::Contains("Input is not paired or not qname-grouped?"));
 }
 
@@ -287,9 +295,14 @@ TEST_CASE("markdups::process_qname_group strip_previous==false", "[process_qname
   REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
   std::stringstream os;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  uint64_t n_tpl_unmap {0}, n_tpl_dup {0}, n_aln_dup {0};
-  process_qname_group(qn1, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, 1, false);
-  process_qname_group(qn2, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, 1, false);
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=1,
+    .cli_args={ "dummy" } };
+  counts tally { 0, 0, 0, 0, 0 };
+  process_qname_group(qn1, os, bf, conf, tally);
+  process_qname_group(qn2, os, bf, conf, tally);
   qn1[0].parse();
   qn2[0].parse();
   // original dupe flag and PG remain on first read even though it was processed first
@@ -312,9 +325,14 @@ TEST_CASE("markdups::process_qname_group strip_previous==true", "[process_qname_
   REQUIRE_THAT(sr2.buffer, !Catch::Matchers::Contains("PG:Z:"));
   std::stringstream os;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  uint64_t n_tpl_unmap {0}, n_tpl_dup {0}, n_aln_dup {0};
-  process_qname_group(qn1, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, 1, true);
-  process_qname_group(qn2, os, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup, 1, true);
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=true,
+    .reads_per_template=1,
+    .cli_args={ "dummy" } };
+  counts tally { 0, 0, 0, 0, 0 };
+  process_qname_group(qn1, os, bf, conf, tally);
+  process_qname_group(qn2, os, bf, conf, tally);
   qn1[0].parse();
   qn2[0].parse();
   // original dupe flag and PG stripped from first read
@@ -333,8 +351,12 @@ TEST_CASE("markdups::process_input_stream single reads", "[process_input_stream]
   "NB551151:333:fake1:4:12509:22440:18769\t16\tchr1\t4505378\t255\t76M\t*\t0\t0\tAAATCAACCCTTTCCTCTTCAACTTGTCTTGGTCATGGTGTTTCATCACAGCAATAGTAACCCTAACTAAAACAGG\tEEE<E/AEEAAEE/EEEEEA6/EEEEEEEE6AAEEEAEEEEE/EEEAEEEEEEEEEEEE//EAEEAEEEA/AA/AA\tNH:i:1\tHI:i:1\tAS:i:74\tnM:i:0\tNM:i:0\tMD:Z:76\tjM:B:c,-1\tjI:B:i,-1\tRG:Z:ec6fd08a-5874-476c-a6c6-24ba72aa308e\n" };
   std::stringstream out;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(in, out, bf, cli_args, 1);
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=1,
+    .cli_args={ "dummy" } };
+  auto result = process_input_stream(in, out, bf, conf);
   CHECK(result.templates == 4);
   CHECK(result.templates_marked_duplicate == 1); // the second read
   CHECK(result.alignments == 4);
@@ -351,8 +373,12 @@ TEST_CASE("markdups::process_input_stream paired reads", "[process_input_stream]
   };
   std::stringstream out;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(in, out, bf, cli_args, 2);
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=2,
+    .cli_args={ "dummy" } };
+  auto result = process_input_stream(in, out, bf, conf);
   CHECK(result.templates == 2);
   CHECK(result.templates_marked_duplicate == 1); // the second pair 
   CHECK(result.alignments == 4);
@@ -368,8 +394,12 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
   };
   std::stringstream out;
   bloomfilter::BloomFilter bf(0.001, 1000);
-  std::vector<std::string> cli_args { "dummy", "args" };
-  auto result = process_input_stream(in, out, bf, cli_args, 2);
+  config conf {
+    .remove_duplicates=false,
+    .strip_previous=false,
+    .reads_per_template=2,
+    .cli_args={ "dummy" } };
+  auto result = process_input_stream(in, out, bf, conf);
   CHECK(result.templates == 1);
   CHECK(result.templates_unmapped == 1);
   CHECK(result.templates_marked_duplicate == 0); 
@@ -397,7 +427,7 @@ TEST_CASE("markdups::process_input_stream unmapped", "[process_input_stream]"){
    set as the original, where streammd must pick the first.
  */
 TEST_CASE("markdups::process_input_stream full SAM", "[process_input_stream]") {
-  metrics result = test_streammd(
+  counts result = test_streammd(
       "resources/test.paired_full.sam",
       "resources/test.paired_full.picardmd.sam");
   CHECK(result.templates == 2027);

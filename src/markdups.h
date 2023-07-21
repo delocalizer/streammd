@@ -30,9 +30,16 @@ const std::string _pgtag { SAM_delimiter + pgtag };
 const std::string pgtagval { _pgtag + pgid };
 const std::string unmapped { DEL };
 
-struct metrics {
+struct counts {
   uint64_t templates, templates_unmapped, templates_marked_duplicate,
            alignments, alignments_marked_duplicate;
+};
+
+struct config {
+  bool remove_duplicates;
+  bool strip_previous;
+  size_t reads_per_template;
+  std::vector<std::string> cli_args;
 };
 
 // A highly specialized representation of a SAM record, for the purposes of
@@ -187,14 +194,11 @@ inline std::string join(
   return joined;
 }
 
-metrics process_input_stream(
+counts process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
-    std::vector<std::string> cli_args,
-    size_t reads_per_template = 2,
-    bool strip_previous = false,
-    bool remove_duplicates = false);
+    config& conf);
 
 void pgline(
     std::ostream& out,
@@ -205,19 +209,14 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
-    uint64_t& n_tpl_unmap,
-    uint64_t& n_tpl_dup,
-    uint64_t& n_aln_dup,
-    size_t reads_per_template = 2,
-    bool strip_previous = false,
-    bool remove_duplicates = false);
+    config& conf,
+    counts& tally);
 
 std::deque<std::string> template_ends(
     const std::vector<SamRecord>& qname_group);
 
 void write_metrics(
     std::string metricsfname,
-    metrics metrics);
-
+    counts& tally);
 }
 #endif // STREAMMD_MARKDUPS_H_

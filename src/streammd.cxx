@@ -114,6 +114,12 @@ int main(int argc, char* argv[]) {
     auto metricsfname = cli.get("--metrics");
     std::ifstream inf;
     std::ofstream outf;
+    config conf {
+      cli.get<bool>("--remove-duplicates"),
+      cli.get<bool>("--strip-previous"),
+      cli.get<bool>("--single") ? 1U : 2U,
+      args
+    };
 
     auto result = process_input_stream(
         infname ? [&]() -> std::istream& {
@@ -131,10 +137,7 @@ int main(int argc, char* argv[]) {
           return outf;
         }() : std::cout,
         bf,
-        args,
-        cli.get<bool>("--single") ? 1 : 2,
-        cli.get<bool>("--strip-previous"),
-        cli.get<bool>("--remove-duplicates")
+        conf
     );
     auto nadded { result.templates
                   - result.templates_unmapped
@@ -146,10 +149,10 @@ int main(int argc, char* argv[]) {
       spdlog::info("Estimated marginal false positive rate: {:.2e}", marginal_fp);
       write_metrics(metricsfname, result);
     } else if (cli.get<bool>("--allow-overcapacity")) {
-      write_metrics(metricsfname, result);
       spdlog::warn("{} items leaves BloomFilter at {:.3g}% capacity.",
                    nadded, 100*cap);
       spdlog::warn("False positive rate {} exceeded.", bf.p());
+      write_metrics(metricsfname, result);
     } else {
       spdlog::error("{} items leaves BloomFilter at {:.3g}% capacity.",
                     nadded, 100*cap);

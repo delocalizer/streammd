@@ -9,17 +9,14 @@ namespace markdups {
 
 // Process the input stream. Header lines are written directly to the output
 // stream; reads are dispatched in qname groups for further processing.
-metrics process_input_stream(
+counts process_input_stream(
     std::istream& in,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
-    std::vector<std::string> cli_args,
-    size_t reads_per_template,
-    bool strip_previous,
-    bool remove_duplicates) {
+    config& conf) {
 
   bool header_done { false };
-  uint64_t n_tpl { 0 }, n_tpl_unmap {0}, n_tpl_dup {0}, n_aln {0}, n_aln_dup {0};
+  counts tally { 0, 0, 0, 0, 0 };
   std::string header_prev { "" };
   std::string qname;
   std::string qname_prev { "" };
@@ -32,20 +29,19 @@ metrics process_input_stream(
       out << "\n";
       header_prev = samrecord.buffer;
     } else {
-      n_aln += 1;
+      tally.alignments += 1;
       if (!header_done) {
-        pgline(out, header_prev, cli_args);
+        pgline(out, header_prev, conf.cli_args);
         header_done = true;
       }
       samrecord.parse();
       if (samrecord.qname() != qname_prev) {
-        n_tpl += 1;
-        if (n_tpl % log_interval == 0) {
-          spdlog::debug("qnames seen: {0}", n_tpl);
+        tally.templates += 1;
+        if (tally.templates % log_interval == 0) {
+          spdlog::debug("qnames seen: {0}", tally.templates);
         }
         if (qname_group.size()) {
-          process_qname_group(qname_group, out, bf, n_tpl_unmap, n_tpl_dup,
-	      n_aln_dup, reads_per_template, strip_previous, remove_duplicates);
+          process_qname_group(qname_group, out, bf, conf, tally);
           qname_group.clear();
         }
         qname_prev = samrecord.qname();
@@ -54,9 +50,8 @@ metrics process_input_stream(
     }
   }
   // handle the last group
-  process_qname_group(qname_group, out, bf, n_tpl_unmap, n_tpl_dup, n_aln_dup,
-      reads_per_template, strip_previous, remove_duplicates);
-  return metrics { n_tpl, n_tpl_unmap, n_tpl_dup, n_aln, n_aln_dup };
+  process_qname_group(qname_group, out, bf, conf, tally);
+  return tally;
 }
 
 // Write @PG line to the output stream; to be called after all existing header
@@ -92,18 +87,14 @@ void process_qname_group(
     std::vector<SamRecord>& qname_group,
     std::ostream& out,
     bloomfilter::BloomFilter& bf,
-    uint64_t& n_tpl_unmap,
-    uint64_t& n_tpl_dup,
-    uint64_t& n_aln_dup,
-    size_t reads_per_template,
-    bool strip_previous,
-    bool remove_duplicates) {
+    config& conf,
+    counts& tally) {
 
   // calculate ends
   auto ends = template_ends(qname_group);
 
-  if (ends.size() != reads_per_template) {
-    std::string err = (reads_per_template == 1)
+  if (ends.size() != conf.reads_per_template) {
+    std::string err = (conf.reads_per_template == 1)
       ? "Input is not single reads?"
       : "Input is not paired or not qname-grouped?";
     throw std::runtime_error(
@@ -112,27 +103,27 @@ void process_qname_group(
   }
 
   std::string signature {
-    (reads_per_template == 1) 
+    (conf.reads_per_template == 1) 
       ? ends.front()
       : ends.front() + '_' + ends.back() };
 
   if (ends.front() == unmapped) {
     // sort order => if 1st is unmapped all are. 
-    n_tpl_unmap += 1;
+    tally.templates_unmapped += 1;
   } else if (!bf.add(signature)) {
     // ends already seen => dupe
-    n_tpl_dup += 1;
+    tally.templates_marked_duplicate += 1;
     // mark all reads in the group as dupes including secondary, supplementary
     // and unmapped: this is what Picard MD does when operating on QNAME grouped
     // (but not COORD sorted) records.
     for (auto & read : qname_group) {
-      n_aln_dup += 1;
+      tally.alignments_marked_duplicate += 1;
       read.update_dup_status(true);
     }
-    if (remove_duplicates) {
+    if (conf.remove_duplicates) {
       return;
     }
-  } else if (strip_previous) {
+  } else if (conf.strip_previous) {
     for (auto & read : qname_group) {
       read.update_dup_status(false);
     }
@@ -208,16 +199,16 @@ std::deque<std::string> template_ends(
 }
 
 // Log and write metrics to file as JSON.
-void write_metrics(std::string metricsfname, metrics metrics) {
+void write_metrics(std::string metricsfname, counts& tally) {
 
   float dup_frac {
-      float(metrics.templates_marked_duplicate)/
-	      (metrics.templates - metrics.templates_unmapped)}; 
-  spdlog::info("alignments seen: {}", metrics.alignments);
-  spdlog::info("alignments marked duplicate: {}", metrics.alignments_marked_duplicate);
-  spdlog::info("templates seen: {}", metrics.templates);
-  spdlog::info("templates unmapped: {}", metrics.templates_unmapped);
-  spdlog::info("templates marked duplicate: {}", metrics.templates_marked_duplicate);
+      float(tally.templates_marked_duplicate)/
+	      (tally.templates - tally.templates_unmapped)}; 
+  spdlog::info("alignments seen: {}", tally.alignments);
+  spdlog::info("alignments marked duplicate: {}", tally.alignments_marked_duplicate);
+  spdlog::info("templates seen: {}", tally.templates);
+  spdlog::info("templates unmapped: {}", tally.templates_unmapped);
+  spdlog::info("templates marked duplicate: {}", tally.templates_marked_duplicate);
   spdlog::info("template duplicate fraction: {:.4f}", dup_frac);
 
   std::ofstream metricsf;
@@ -234,11 +225,11 @@ void write_metrics(std::string metricsfname, metrics metrics) {
       "\"TEMPLATES_MARKED_DUPLICATE\":{},"
       "\"TEMPLATE_DUPLICATE_FRACTION\":{:.4f}"
     "}}", 
-    metrics.alignments,
-    metrics.alignments_marked_duplicate,
-    metrics.templates,
-    metrics.templates_unmapped,
-    metrics.templates_marked_duplicate,
+    tally.alignments,
+    tally.alignments_marked_duplicate,
+    tally.templates,
+    tally.templates_unmapped,
+    tally.templates_marked_duplicate,
     dup_frac);
 }
 

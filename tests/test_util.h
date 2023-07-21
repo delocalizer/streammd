@@ -14,8 +14,8 @@ using namespace markdups;
 void record_flags(std::istream& instream, SamRecordFlags& flags);
 
 // Run process_input_stream against input SAM file; check SAM output against the
-// reference file. The metrics struct is returned for possible further checks.
-metrics test_streammd(
+// reference file. The counts struct is returned for possible further checks.
+counts test_streammd(
     std::string input_path,
     std::string reference_path,
     size_t reads_per_template=2,
