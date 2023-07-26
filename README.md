@@ -38,7 +38,7 @@ Additionally, the current implementation handles SAM format input only.
 
 ### Installation
 
-* a compiler that supports c++17 e.g. gcc >= 7.1 or clang >= 5.
+* Requires c++17  with `<charconv>`. gcc >= 8.1 or clang >= 7 should work.
 
 ## Install
 
