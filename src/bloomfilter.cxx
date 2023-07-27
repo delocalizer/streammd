@@ -26,27 +26,22 @@ bool BloomFilter::contains(const std::string& item) {
   uint64_t hashes[k_];
   hash(item, hashes);
   for (size_t i = 0; i < k_; i++) {
-    uint64_t pos { mpow2_ ? hashes[i] & mask_ : hashes[i] % m_ };
-    if (!bitset->test(pos)) {
-      return false;
-    }
+    if (!bitset->test(hashes[i])) { return false; }
   }
   return true;
 }
 
 // Add the item; return false if it was already present otherwise true.
 bool BloomFilter::add(const std::string& item) {
-  bool added { false };
   uint64_t hashes[k_];
   hash(item, hashes);
   for (size_t i = 0; i < k_; i++) {
-    uint64_t pos { mpow2_ ? hashes[i] & mask_ : hashes[i] % m_ };
-    if (!bitset->test(pos)) {
-      bitset->set(pos);
-      added = true;
-    }
+    if (!bitset->test(hashes[i])) { goto add_the_item; }
   }
-  return added;
+  return false;
+add_the_item:
+  for (size_t i = 0; i < k_; i++) { bitset->set(hashes[i]); }
+  return true;
 }
 
 // Return the estimated number of items stored.
@@ -106,7 +101,7 @@ void BloomFilter::initialize(){
                 mpow2_ ? "bit mask" : "modulus");
 }
 
-// Generate k hash values for the item.
+// Generate hash values and map onto k bitarray offsets.
 //
 // k linear combinations of just 2 independent hashes ("double hashing") has
 // the same asymptotic behaviour as k independent hashes.
@@ -118,7 +113,7 @@ void BloomFilter::hash(const std::string& item, uint64_t* buf) {
   auto a { XXH3_64bits_withSeed(cstr, len, seed1_) };
   auto b { XXH3_64bits_withSeed(cstr, len, seed2_) };
   for (size_t i = 0; i < k_; i++) {
-    buf[i] = a;
+    buf[i] = mpow2_ ? a & mask_ : a % m_;
     a += b;
     b += i;
   }
