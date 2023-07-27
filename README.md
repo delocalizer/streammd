@@ -9,7 +9,7 @@ to a file at the end of processing.
 
 ### Features
 
-* Fast — with default settings `streammd` is ~4x faster than Picard
+* Fast — with default settings `streammd` is ~5x faster than Picard
   MarkDuplicates.
 * Low memory footprint even for large libraries — with default settings
   `streammd` requires just 4G to process 1B templates.
@@ -195,4 +195,4 @@ bwa mem ref.fa r1.fq r2.fq|streammd|samtools view -@2 -o some.MD.bam
 ```
 ### Citing
 
-Please cite https://doi.org/10.1093/bioinformatics/btad181 when referring to `streammd` in publications.
+Please consider citing https://doi.org/10.1093/bioinformatics/btad181 when referring to `streammd` in publications.
