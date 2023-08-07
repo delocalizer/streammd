@@ -1,8 +1,0 @@
-diff --git a/external/xxHash/Makefile b/external/xxHash/Makefile
-index 649f290..748d946 100644
---- a/external/xxHash/Makefile
-+++ b/external/xxHash/Makefile
-@@ -49 +49,2 @@ XXHSUM_VERSION = $(LIBVER)
--UNAME := $(shell uname)
-+#UNAME := $(shell uname)
-+UNAME := Darwin

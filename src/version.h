@@ -1,6 +1,0 @@
-#ifndef STREAMMD_VERSION_H
-#define STREAMMD_VERSION_H
-
-#define STREAMMD_VERSION "4.3.0"
-
-#endif // STREAMMD_VERSION_H
